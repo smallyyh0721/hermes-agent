@@ -918,4 +918,20 @@ hermes-agent/
 
 ---
 
-**文档状态**：Draft v0.1 · 欢迎在 PR 中评审并迭代。
+**文档状态**：Draft v0.1 → **Phase 1 已完成** · Phase 2 计划见 `docs/ProAgent-Phase2-Plan.md`
+
+### Phase 1 完成记录（2026-05-11）
+
+已交付：
+- `proagent/` 完整代码（core/policy/domain/cli）
+- 独立 Agent 循环（不依赖 Hermes run_agent.py）
+- MiniMax CN / OpenAI / Anthropic 三 Provider 支持
+- SSH 连接池（Windows 兼容）
+- Policy Guard 57 条 denylist 规则
+- SQLite 审计
+- Discord Gateway（含代理支持）
+- `--verbose` 执行追踪
+- 代码精简（删除 66 文件 / 57k LOC）
+- 人工测试指南（`docs/ProAgent-Manual-Test.md`）
+
+分支：`feature/proagent-redesign`
