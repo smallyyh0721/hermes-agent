@@ -35,6 +35,7 @@ def main():
     run_parser = subparsers.add_parser("run", help="Start interactive chat")
     run_parser.add_argument("--config", "-c", help="Path to proagent.yaml")
     run_parser.add_argument("--target", "-t", help="Override default target")
+    run_parser.add_argument("--verbose", "-v", action="store_true", help="Show tool calls and thinking process")
 
     # setup
     subparsers.add_parser("setup", help="Interactive setup wizard")
@@ -67,6 +68,7 @@ def main():
     inspect_parser = subparsers.add_parser("inspect", help="Run one-shot inspection")
     inspect_parser.add_argument("--target", "-t", help="Target to inspect")
     inspect_parser.add_argument("--kind", choices=["quick", "full"], default="quick")
+    inspect_parser.add_argument("--verbose", "-v", action="store_true", help="Show tool calls and thinking process")
 
     # status
     subparsers.add_parser("status", help="Show runtime status")
@@ -135,6 +137,7 @@ def cmd_run(args):
 
     # Build the minimal ProAgent
     mc = config.models.executor
+    verbose = getattr(args, "verbose", False)
     try:
         agent = ProAgent(
             provider=mc.provider,
@@ -142,6 +145,7 @@ def cmd_run(args):
             system_prompt=runtime.build_hermes_system_prompt(),
             tools=[build_server_shell_tool(runtime)],
             base_url=mc.base_url,
+            verbose=verbose,
         )
     except RuntimeError as e:
         print(f"❌ {e}")
@@ -203,7 +207,7 @@ def _run_hermes_agent(runtime, config):
     _run_repl_from_runtime(runtime, config)
 
 
-def _run_repl_from_runtime(runtime, config):
+def _run_repl_from_runtime(runtime, config, verbose=False):
     """Helper: build agent from runtime+config and run REPL."""
     from proagent.core.agent import ProAgent, build_server_shell_tool
     mc = config.models.executor
@@ -213,6 +217,7 @@ def _run_repl_from_runtime(runtime, config):
         system_prompt=runtime.build_hermes_system_prompt(),
         tools=[build_server_shell_tool(runtime)],
         base_url=mc.base_url,
+        verbose=verbose,
     )
     _run_repl(agent, runtime)
 
@@ -460,12 +465,14 @@ def cmd_inspect(args):
 
     # Build agent and send inspection prompt
     mc = config.models.executor
+    verbose = getattr(args, "verbose", False)
     agent = ProAgent(
         provider=mc.provider,
         model=mc.model,
         system_prompt=runtime.build_hermes_system_prompt(),
         tools=[build_server_shell_tool(runtime)],
         base_url=mc.base_url,
+        verbose=verbose,
     )
 
     run_id = runtime.create_inspection_run(config.default_target, args.kind, "cli")

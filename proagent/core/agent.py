@@ -63,8 +63,11 @@ class ProAgent:
         api_key: str = "",
         base_url: str = "",
         max_tokens: int = 4096,
+        verbose: bool = False,
     ):
         from proagent.core.providers import resolve_provider
+
+        self.verbose = verbose
 
         # Resolve provider to canonical form + default base URL
         profile = resolve_provider(provider)
@@ -132,6 +135,9 @@ class ProAgent:
 
         # Iterate up to MAX_ITERATIONS rounds of tool calls
         for iteration in range(self.MAX_ITERATIONS):
+            if self.verbose:
+                self._trace(f"[iter {iteration+1}] Calling LLM ({self.provider}/{self.model})...")
+
             if self.api_mode == "openai":
                 response = self._call_openai()
             elif self.api_mode == "anthropic":
@@ -140,10 +146,18 @@ class ProAgent:
                 return f"❌ Unsupported api_mode: {self.api_mode}"
 
             if response.tool_calls:
+                # Show thinking if present
+                if self.verbose and response.content:
+                    self._trace(f"[thinking] {response.content}")
+
                 # Execute tools, add results to history, loop
                 self.messages.append(response)
                 for tc in response.tool_calls:
+                    self._trace_tool_call(tc)
+                    start = time.time()
                     result = self._execute_tool(tc)
+                    elapsed = time.time() - start
+                    self._trace_tool_result(tc, result, elapsed)
                     self.messages.append(Message(
                         role="tool",
                         content=result,
@@ -154,9 +168,42 @@ class ProAgent:
             else:
                 # Final response
                 self.messages.append(response)
+                if self.verbose:
+                    self._trace(f"[done] {iteration+1} iteration(s), returning final answer")
                 return response.content
 
         return "⚠️ Max tool-calling iterations reached without final answer."
+
+    # ========================================================================
+    # Trace / Verbose output
+    # ========================================================================
+
+    def _trace(self, msg: str) -> None:
+        """Print a trace message (only when verbose=True)."""
+        if self.verbose:
+            print(f"  \033[90m{msg}\033[0m")  # gray text
+
+    def _trace_tool_call(self, tc: Dict[str, Any]) -> None:
+        """Print tool call info."""
+        if not self.verbose:
+            return
+        name = tc.get("name", "?")
+        args = tc.get("arguments", {})
+        if isinstance(args, str):
+            args_str = args[:120]
+        else:
+            args_str = json.dumps(args, ensure_ascii=False)[:120]
+        print(f"  \033[36m⚡ {name}\033[0m({args_str})")
+
+    def _trace_tool_result(self, tc: Dict[str, Any], result: str, elapsed: float) -> None:
+        """Print tool result summary."""
+        if not self.verbose:
+            return
+        name = tc.get("name", "?")
+        # Show first 200 chars of result
+        preview = result.replace("\n", " ")[:200]
+        status = "\033[32m✓\033[0m" if not result.startswith("⛔") and not result.startswith("❌") else "\033[31m✗\033[0m"
+        print(f"  {status} \033[90m{name} ({elapsed:.1f}s) → {preview}\033[0m")
 
     def _execute_tool(self, tc: Dict[str, Any]) -> str:
         """Execute a single tool call, return result as string."""
