@@ -103,7 +103,7 @@ def cmd_run(args):
     """Start interactive chat with the ProAgent."""
     from proagent.core.config import load_config, find_config_file
     from proagent.core.runtime import ProAgentRuntime
-    from proagent.domain.server_health_inspector.tools.read_only.server_shell import set_runtime
+    from proagent.core.agent import ProAgent, build_server_shell_tool
 
     config_path = Path(args.config) if hasattr(args, "config") and args.config else None
     config = load_config(config_path)
@@ -120,7 +120,6 @@ def cmd_run(args):
 
     # Initialize runtime
     runtime = ProAgentRuntime(config=config)
-    set_runtime(runtime)
 
     # Connect to targets
     print("📡 Connecting to targets...")
@@ -134,10 +133,21 @@ def cmd_run(args):
         print("❌ No targets connected. Run 'proagent target test' to diagnose.")
         sys.exit(1)
 
-    # Import and register the server_shell tool
-    import proagent.domain.server_health_inspector.tools.read_only.server_shell  # noqa: F401
+    # Build the minimal ProAgent
+    mc = config.models.executor
+    try:
+        agent = ProAgent(
+            provider=mc.provider,
+            model=mc.model,
+            system_prompt=runtime.build_hermes_system_prompt(),
+            tools=[build_server_shell_tool(runtime)],
+            base_url=mc.base_url,
+        )
+    except RuntimeError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
 
-    # Start Hermes agent in CLI mode
+    # Start REPL
     print("💬 Starting agent... (type 'exit' or Ctrl+C to quit)")
     print("   Ask me about server health, e.g.:")
     print("   - '服务器状态如何？'")
@@ -146,28 +156,11 @@ def cmd_run(args):
     print("   - '最近有什么错误日志？'")
     print()
 
-    _run_hermes_agent(runtime, config)
+    _run_repl(agent, runtime)
 
 
-def _run_hermes_agent(runtime, config):
-    """Run the Hermes AIAgent with ProAgent configuration."""
-    try:
-        from run_agent import AIAgent
-    except ImportError:
-        # Try alternative import path
-        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-        from run_agent import AIAgent
-
-    agent_kwargs = runtime.get_hermes_agent_kwargs()
-
-    # Only enable the proagent toolset (server_shell)
-    agent_kwargs["enabled_toolsets"] = ["proagent"]
-    agent_kwargs["platform"] = "cli"
-    agent_kwargs["quiet_mode"] = False
-
-    agent = AIAgent(**agent_kwargs)
-
-    # Simple REPL loop
+def _run_repl(agent, runtime):
+    """Run the interactive REPL with the ProAgent."""
     try:
         while True:
             try:
@@ -179,9 +172,13 @@ def _run_hermes_agent(runtime, config):
                 continue
             if user_input.lower() in ("exit", "quit", "q"):
                 break
+            if user_input.lower() in ("/new", "/reset"):
+                agent.reset()
+                print("🔄 Conversation reset")
+                continue
 
             try:
-                response = agent.run_conversation(user_input)
+                response = agent.chat(user_input)
                 if response:
                     print(f"\n🤖 {response}")
             except KeyboardInterrupt:
@@ -189,12 +186,35 @@ def _run_hermes_agent(runtime, config):
                 continue
             except Exception as e:
                 print(f"\n❌ Error: {e}")
+                import traceback
+                traceback.print_exc()
 
     except KeyboardInterrupt:
         pass
 
     print("\n👋 ProAgent session ended.")
     runtime.ssh_pool.disconnect_all()
+
+
+def _run_hermes_agent(runtime, config):
+    """DEPRECATED: Kept for backward compatibility.
+    Phase 1 uses the minimal ProAgent via _run_repl() instead of Hermes AIAgent.
+    """
+    _run_repl_from_runtime(runtime, config)
+
+
+def _run_repl_from_runtime(runtime, config):
+    """Helper: build agent from runtime+config and run REPL."""
+    from proagent.core.agent import ProAgent, build_server_shell_tool
+    mc = config.models.executor
+    agent = ProAgent(
+        provider=mc.provider,
+        model=mc.model,
+        system_prompt=runtime.build_hermes_system_prompt(),
+        tools=[build_server_shell_tool(runtime)],
+        base_url=mc.base_url,
+    )
+    _run_repl(agent, runtime)
 
 
 def cmd_setup(args):
@@ -379,14 +399,13 @@ def cmd_inspect(args):
     """Run a one-shot inspection."""
     from proagent.core.config import load_config
     from proagent.core.runtime import ProAgentRuntime
-    from proagent.domain.server_health_inspector.tools.read_only.server_shell import set_runtime
+    from proagent.core.agent import ProAgent, build_server_shell_tool
 
     config = load_config()
     if hasattr(args, "target") and args.target:
         config.default_target = args.target
 
     runtime = ProAgentRuntime(config=config)
-    set_runtime(runtime)
 
     print(f"🔍 Running {args.kind} inspection on '{config.default_target}'...")
     results = runtime.connect_targets()
@@ -395,9 +414,34 @@ def cmd_inspect(args):
         print(f"❌ Cannot connect to target '{config.default_target}'")
         sys.exit(1)
 
-    # Run inspection via agent
-    import proagent.domain.server_health_inspector.tools.read_only.server_shell  # noqa: F401
-    _run_hermes_agent(runtime, config)
+    # Build agent and send inspection prompt
+    mc = config.models.executor
+    agent = ProAgent(
+        provider=mc.provider,
+        model=mc.model,
+        system_prompt=runtime.build_hermes_system_prompt(),
+        tools=[build_server_shell_tool(runtime)],
+        base_url=mc.base_url,
+    )
+
+    run_id = runtime.create_inspection_run(config.default_target, args.kind, "cli")
+
+    if args.kind == "quick":
+        prompt = "执行快速健康检查：CPU、内存、磁盘、failed services、最近错误日志。给出结构化报告。"
+    else:
+        prompt = "执行深度健康检查：系统信息、CPU详情、内存详情、磁盘详情、网络、全部服务状态、24小时错误日志。给出完整结构化报告。"
+
+    try:
+        response = agent.chat(prompt)
+        print()
+        print(response)
+        runtime.complete_inspection_run(run_id, "ok", summary=response[:500])
+    except Exception as e:
+        print(f"❌ Inspection failed: {e}")
+        runtime.complete_inspection_run(run_id, "error", summary=str(e)[:500])
+        sys.exit(1)
+    finally:
+        runtime.ssh_pool.disconnect_all()
 
 
 def cmd_status(args):
@@ -425,44 +469,120 @@ def cmd_gateway(args):
     """Start the gateway (Discord) mode."""
     from proagent.core.config import load_config
     from proagent.core.runtime import ProAgentRuntime
-    from proagent.domain.server_health_inspector.tools.read_only.server_shell import set_runtime
+    from proagent.core.agent import ProAgent, build_server_shell_tool
 
     config_path = Path(args.config) if hasattr(args, "config") and args.config else None
     config = load_config(config_path)
 
-    print("🚀 ProAgent Gateway starting...")
+    print("🚀 ProAgent Discord Gateway starting...")
     runtime = ProAgentRuntime(config=config)
-    set_runtime(runtime)
 
     # Connect targets
     results = runtime.connect_targets()
     for target_id, success in results.items():
         status = "✅" if success else "❌"
         print(f"   {status} {target_id}")
-
-    # Register tool
-    import proagent.domain.server_health_inspector.tools.read_only.server_shell  # noqa: F401
-
-    # Start Hermes gateway with ProAgent config
-    print("\n📡 Starting Hermes gateway with ProAgent domain...")
-    print("   (This will connect to Discord and listen for messages)")
     print()
 
-    # Set environment for Hermes gateway
-    os.environ["HERMES_PROAGENT_MODE"] = "1"
-    os.environ.setdefault("HERMES_PROAGENT_SYSTEM_PROMPT", runtime.build_hermes_system_prompt())
+    # Build the agent
+    mc = config.models.executor
+    agent = ProAgent(
+        provider=mc.provider,
+        model=mc.model,
+        system_prompt=runtime.build_hermes_system_prompt(),
+        tools=[build_server_shell_tool(runtime)],
+        base_url=mc.base_url,
+    )
 
-    # Import and run Hermes gateway
-    try:
-        from gateway.run import start_gateway
-        import asyncio
-        asyncio.run(start_gateway())
-    except ImportError as e:
-        print(f"❌ Cannot import Hermes gateway: {e}")
-        print("   Make sure you're running from the hermes-agent directory")
+    # Start Discord bot
+    token = os.environ.get("DISCORD_BOT_TOKEN", "")
+    if not token:
+        discord_gw = config.gateways.get("discord")
+        if discord_gw:
+            token = discord_gw.settings.get("token", "")
+    if not token:
+        print("❌ DISCORD_BOT_TOKEN not set in environment or proagent.yaml")
         sys.exit(1)
+
+    try:
+        import discord
+    except ImportError:
+        print("❌ discord.py not installed. Run: pip install 'discord.py>=2.3'")
+        sys.exit(1)
+
+    intents = discord.Intents.default()
+    intents.message_content = True
+
+    client = discord.Client(intents=intents)
+
+    # Per-user conversation agents
+    user_agents: Dict[int, ProAgent] = {}  # type: ignore
+
+    def _get_agent_for(user_id: int) -> ProAgent:
+        if user_id not in user_agents:
+            user_agents[user_id] = ProAgent(
+                provider=mc.provider,
+                model=mc.model,
+                system_prompt=runtime.build_hermes_system_prompt(),
+                tools=[build_server_shell_tool(runtime)],
+                base_url=mc.base_url,
+            )
+        return user_agents[user_id]
+
+    @client.event
+    async def on_ready():
+        print(f"✅ Discord connected as {client.user}")
+        print("   Send a DM or @ mention the bot to interact")
+
+    @client.event
+    async def on_message(message):
+        if message.author == client.user:
+            return
+
+        # Only respond to DMs or mentions
+        is_dm = isinstance(message.channel, discord.DMChannel)
+        is_mention = client.user in message.mentions
+        if not (is_dm or is_mention):
+            return
+
+        # Strip mention
+        content = message.content
+        if client.user:
+            content = content.replace(f"<@{client.user.id}>", "").strip()
+
+        if not content:
+            return
+
+        # Special commands
+        if content.lower() in ("/new", "/reset"):
+            user_agents.pop(message.author.id, None)
+            await message.reply("🔄 Conversation reset")
+            return
+
+        # Process via agent (blocking call in executor)
+        import asyncio
+        async with message.channel.typing():
+            user_agent = _get_agent_for(message.author.id)
+            try:
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None, user_agent.chat, content
+                )
+            except Exception as e:
+                response = f"❌ Error: {e}"
+
+        # Split long responses
+        if not response:
+            response = "(empty response)"
+        # Discord message limit is 2000 chars
+        chunks = [response[i:i+1900] for i in range(0, len(response), 1900)]
+        for chunk in chunks:
+            await message.reply(f"```\n{chunk}\n```" if "\n" in chunk else chunk)
+
+    try:
+        client.run(token)
     except KeyboardInterrupt:
         print("\n👋 Gateway stopped.")
+    finally:
         runtime.ssh_pool.disconnect_all()
 
 
