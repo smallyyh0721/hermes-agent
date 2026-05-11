@@ -50,7 +50,7 @@ Hermes Agent 是一款"自我改进型通用个人助理"，具备：
 1. **核心 Runtime 稳定单一**：只保留 Agent Loop / Prompt / Memory / Skills / Tool Dispatch / Session Audit
 2. **领域能力插件化**：以 Domain Pack 形式装配（SRE Pack、Testing Pack、Finance Pack、DBA Pack …）
 3. **权限硬边界**：三层工具分类（read_only / suggest / write_action）+ Policy Guard
-4. **入口收敛**：只保留 REST API / WeChat / Discord / CLI / Webhook / Scheduler / Internal Event Bus
+4. **入口收敛**：只保留 REST API / WeChat / Discord / Feishu / CLI / Webhook / Scheduler / Internal Event Bus
 5. **快速转型**：切换 Domain Pack 即可让同一 Runtime 变成另一领域的专家
 6. **第一阶段小而完整**：用一台服务器健康巡检 Agent 走通端到端链路，摸清 Agent 设计要点
 
@@ -90,6 +90,7 @@ Hermes Agent 是一款"自我改进型通用个人助理"，具备：
 | Cron/Scheduler | `cron/` | 定时巡检触发器 |
 | Multi-backend Shell | `tools/environments/`（local / docker / ssh / modal / daytona / singularity / vercel） | 连接目标服务器的基础 |
 | I18n | `agent/i18n.py`、`locales/` | 中文输出 |
+| Feishu 工具 | `tools/feishu_doc_tool.py`、`tools/feishu_drive_tool.py` | 飞书文档/云盘读写，作为协作输出通道 |
 
 ### 3.2 裁剪（Phase 1 移除或禁用）
 
@@ -97,10 +98,10 @@ Hermes Agent 是一款"自我改进型通用个人助理"，具备：
 
 | 类别 | 涉及目录/文件 | 处理 |
 | --- | --- | --- |
-| 多聊天入口 | `gateway/platforms/telegram.py`、`whatsapp.py`、`signal.py`、`slack.py`、`feishu.py`、`matrix.py`、`mattermost.py`、`sms.py`、`bluebubbles.py`、`homeassistant.py`、`yuanbao*.py`、`dingtalk.py`、`email.py`、`qqbot/`、`wecom_*.py` | **禁用**（保留 `discord.py` / `weixin.py` / `api_server.py` / `webhook.py`） |
+| 多聊天入口 | `gateway/platforms/telegram.py`、`whatsapp.py`、`signal.py`、`slack.py`、`matrix.py`、`mattermost.py`、`sms.py`、`bluebubbles.py`、`homeassistant.py`、`yuanbao*.py`、`dingtalk.py`、`email.py`、`qqbot/`、`wecom_*.py` | **禁用**（保留 `discord.py` / `weixin.py` / `feishu.py` / `api_server.py` / `webhook.py`） |
 | 泛用娱乐工具 | `tools/image_generation_tool.py`、`tools/tts_tool.py`、`tools/transcription_tools.py`、`tools/voice_mode.py`、`tools/neutts_*`、`tools/vision_tools.py` | **禁用** |
 | 浏览器/计算机操控 | `tools/browser_*`、`tools/computer_use*`、`tools/browser_providers/`、`tools/computer_use/` | **禁用**（Phase 3 若需要再按领域开放） |
-| Feishu/Yuanbao/MSGraph 等三方工具 | `tools/feishu_*`、`tools/yuanbao_tools.py`、`tools/microsoft_graph_*`、`tools/homeassistant_tool.py` | **禁用** |
+| Yuanbao/MSGraph 等三方工具 | `tools/yuanbao_tools.py`、`tools/microsoft_graph_*`、`tools/homeassistant_tool.py` | **禁用**（保留 `tools/feishu_*` 飞书文档/云盘工具，作为协作输出通道） |
 | 过多模型适配 | `agent/bedrock_adapter.py`、`agent/gemini_*`、`agent/codex_responses_adapter.py`、`agent/copilot_acp_client.py`、`agent/google_code_assist.py`、`agent/google_oauth.py`、`agent/moonshot_schema.py`、`agent/lmstudio_reasoning.py`、`agent/nous_rate_guard.py` | **按需保留**：Phase 1 仅启用 OpenAI 适配 + Anthropic 适配，其余降级为可选插件（`providers/`） |
 | RL / Atropos / Tinker | `tinker-atropos/`、`rl_cli.py`、`tools/rl_training_tool.py`、`mini_swe_runner.py`、`batch_runner.py`、`trajectory_compressor.py` | **归档**（移入 `archived/`，Phase 1 不启用） |
 | 无约束自动学习 | `agent/curator.py` 中的自动 skill 生成逻辑、`tools/skill_manager_tool.py` 写侧 | **降级为"建议生成，人工审核合并"**（Human-in-the-Loop） |
@@ -128,7 +129,7 @@ Hermes Agent 是一款"自我改进型通用个人助理"，具备：
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Inbound                                                    │
-│   REST API | WeChat | Discord | CLI | Webhook | Cron | Bus  │
+│   REST API | WeChat | Discord | Feishu | CLI | Webhook | Cron | Bus  │
 └───────────────────────────┬─────────────────────────────────┘
                             │ Task Envelope
                             ▼
@@ -246,6 +247,7 @@ models:
 gateways:
   - weixin
   - discord
+  - feishu
   - api
   - cron
 capabilities:
@@ -345,6 +347,10 @@ proagent/domain/server-health-inspector/skills/
 
 **read_only 层**（全部走 SSH / 本地 shell 包装，输出走 tool_output_limits 截断）：
 
+> **设计原则**：read_only 工具不限制具体可执行的 shell 命令，Agent 可灵活使用任何系统命令进行诊断。安全边界由 Policy Guard 的 **denylist 模式**保证——匹配到写/破坏性模式的命令被硬拦截，其余默认放行。这确保了 Agent 面对未知问题时有足够的诊断灵活性。
+
+以下为**常用命令参考**（非穷举，Agent 可根据诊断需要自由组合）：
+
 | Tool | 命令/来源 | 输出 |
 | --- | --- | --- |
 | `host_meta` | `hostnamectl`, `uname -a`, `/etc/os-release` | JSON |
@@ -392,10 +398,11 @@ proagent/domain/server-health-inspector/knowledge/
 | --- | --- | --- |
 | Discord | `gateway/platforms/discord.py` | 主推送 + 问答通道 |
 | WeChat (Weixin) | `gateway/platforms/weixin.py` | 问答 + 快速通知（受平台限制） |
+| Feishu (飞书) | `gateway/platforms/feishu.py` | 问答 + 巡检报告推送 + 飞书文档输出 |
 | REST API | `gateway/platforms/api_server.py` | 内部/外部系统调用 |
 | Cron | `cron/` | 定时巡检触发 |
 | Webhook | `gateway/platforms/webhook.py` | 监控系统 → Agent |
-| CLI | `cli.py` + `hermes_cli/` | 运维本地排查 |
+| CLI | `cli.py` + `hermes_cli/` | 运维本地排查 + 交互式配置 |
 
 其他所有 platform 文件保留但在 `proagent/gateway_profile/phase1.yaml` 中标记 `disabled: true`。
 
@@ -423,17 +430,37 @@ forbidden:
 
 sandbox:
   shell:
-    allowlist_binaries:
-      - hostnamectl, uname, cat, free, uptime, who, last
-      - mpstat, vmstat, iostat, ps, top
-      - df, du, lsblk, smartctl
-      - ss, ip, ping, traceroute
-      - systemctl, journalctl, dmesg
+    # 采用"开放执行 + 黑名单拦截"策略，不限制具体二进制，
+    # 以保证 Agent 可灵活使用任何只读 shell 命令进行诊断。
+    # 安全由 denylist_patterns 硬拦截 + read-only 语义校验保证。
+    mode: denylist          # allowlist | denylist（Phase 1 使用 denylist 模式）
     denylist_patterns:
-      - "rm\\s+-rf"
+      - "rm\\s+"            # 任何 rm 操作
       - "mkfs"
-      - ">[^>]"        # 禁止重定向写
-      - "curl .* \\| sh"
+      - "dd\\s+.*of="      # dd 写盘
+      - ">[^>]"            # 重定向写文件
+      - ">>"               # 追加写文件
+      - "curl .* \\| (sh|bash)"
+      - "wget .* \\| (sh|bash)"
+      - "chmod"
+      - "chown"
+      - "kill\\s+"
+      - "pkill"
+      - "shutdown"
+      - "reboot"
+      - "init\\s+[0-6]"
+      - "systemctl\\s+(start|stop|restart|enable|disable|mask)"
+      - "service\\s+\\S+\\s+(start|stop|restart)"
+      - "iptables"
+      - "nft"
+      - "mount\\s+"
+      - "umount"
+      - "fdisk"
+      - "parted"
+      - "lvremove"
+      - "vgremove"
+      - "pvremove"
+    # 以上模式匹配到即拒绝；未匹配的命令默认允许执行（只读灵活性）
   timeout_sec: 30
   max_output_kb: 256
 
@@ -579,6 +606,10 @@ gateways:
     channels: [ops]
   weixin:
     enabled: true
+  feishu:
+    enabled: true
+    app_id: cli_xxxxx
+    app_secret: ${FEISHU_APP_SECRET}
   api:
     enabled: true
     bind: 127.0.0.1:8787
@@ -601,7 +632,154 @@ audit:
   db: proagent/storage/audit.db
 ```
 
-### 7.8 指标与可观测
+### 7.8 CLI 交互式配置（Setup Wizard）
+
+ProAgent 保留并增强 Hermes 的 CLI 交互式配置能力，用户通过命令行完成首次部署和日常变更，无需手动编辑 YAML。
+
+#### 7.8.1 模型配置（`proagent model`）
+
+复用 Hermes `hermes model` 的交互式选择体验，收敛为 ProAgent 支持的 adapter 范围：
+
+```bash
+# 交互式模型配置向导
+proagent model
+
+# 直接设置（非交互）
+proagent model set planner openai:gpt-4.1-mini
+proagent model set executor openai:gpt-4.1-mini
+proagent model set summarizer anthropic:claude-3-5-haiku
+
+# 查看当前模型配置
+proagent model show
+
+# 测试模型连通性
+proagent model test
+```
+
+交互式流程：
+
+```
+$ proagent model
+┌─ ProAgent 模型配置 ─────────────────────────────┐
+│                                                  │
+│  当前 Domain: server-health-inspector            │
+│                                                  │
+│  选择角色:                                       │
+│  > [1] planner   (任务规划)                      │
+│    [2] executor  (工具执行)                      │
+│    [3] summarizer(结果摘要)                      │
+│    [4] verifier  (结果校验)                      │
+│    [5] 全部重新配置                              │
+│                                                  │
+│  选择 Provider:                                  │
+│  > [1] openai                                    │
+│    [2] anthropic                                 │
+│    [3] minimax (可选)                            │
+│    [4] moonshot (可选)                           │
+│                                                  │
+│  输入 API Key: sk-***                            │
+│  选择 Model: gpt-4.1-mini                        │
+│                                                  │
+│  ✓ 连通性测试通过 (latency: 320ms)              │
+│  ✓ 已写入 proagent.yaml                         │
+└──────────────────────────────────────────────────┘
+```
+
+#### 7.8.2 服务器接入配置（`proagent target`）
+
+新增 CLI 命令，交互式引导用户添加、测试、管理被巡检的目标服务器：
+
+```bash
+# 交互式添加目标服务器
+proagent target add
+
+# 直接添加（非交互）
+proagent target add --id web-01 --backend ssh --host 10.0.0.11 --user ops --keyfile ~/.ssh/id_ed25519
+
+# 添加本地目标
+proagent target add --id local --backend local
+
+# 列出所有目标
+proagent target list
+
+# 测试目标连通性
+proagent target test web-01
+
+# 测试所有目标
+proagent target test --all
+
+# 移除目标
+proagent target remove web-01
+
+# 设置默认目标
+proagent target default web-01
+```
+
+交互式流程：
+
+```
+$ proagent target add
+┌─ 添加巡检目标 ──────────────────────────────────┐
+│                                                  │
+│  目标 ID: web-01                                 │
+│                                                  │
+│  连接方式:                                       │
+│  > [1] local  (本机)                             │
+│    [2] ssh    (SSH 远程)                         │
+│    [3] docker (Docker exec)                      │
+│                                                  │
+│  ── SSH 配置 ──                                  │
+│  主机地址: 10.0.0.11                             │
+│  SSH 端口 [22]: 22                               │
+│  用户名: ops                                     │
+│  认证方式:                                       │
+│  > [1] SSH Key                                   │
+│    [2] Password                                  │
+│  Key 路径 [~/.ssh/id_ed25519]: ~/.ssh/id_ed25519 │
+│                                                  │
+│  ── 连通性测试 ──                                │
+│  ✓ SSH 连接成功                                  │
+│  ✓ 基础命令可执行 (uname, free, df)              │
+│  ✓ 目标 OS: Ubuntu 22.04 LTS (x86_64)           │
+│  ⚠ smartctl 未安装（SMART 巡检将跳过）           │
+│                                                  │
+│  ── 可选标签 ──                                  │
+│  角色 [web/db/app/custom]: web                   │
+│  负责人: zhangsan                                │
+│  备注: 生产 Web 前端                             │
+│                                                  │
+│  ✓ 已添加到 proagent.yaml → targets.hosts        │
+└──────────────────────────────────────────────────┘
+```
+
+连通性测试自动检测：
+
+| 检测项 | 说明 |
+| --- | --- |
+| SSH 握手 | 验证网络可达 + 认证通过 |
+| 基础命令 | 执行 `uname -a`, `free -m`, `df -h` 确认权限 |
+| OS 识别 | 读取 `/etc/os-release` 自动识别发行版 |
+| 工具可用性 | 检测 `smartctl`, `iostat`, `mpstat` 等可选工具是否安装 |
+| sudo 权限 | 检测是否有 `sudo` 且是否需要密码（部分工具如 `smartctl` 需要） |
+
+测试结果写入 `knowledge/system_inventory.md`，Agent 后续巡检时自动跳过不可用的工具。
+
+#### 7.8.3 一键初始化（`proagent setup`）
+
+整合模型 + 目标 + Gateway 的完整初始化向导：
+
+```bash
+proagent setup
+# 依次引导：
+# 1. 选择 Domain Pack
+# 2. 配置模型（planner / executor / summarizer）
+# 3. 添加目标服务器（至少一台）
+# 4. 配置 Gateway（Discord token / WeChat / Feishu）
+# 5. 生成 proagent.yaml
+# 6. 运行首次巡检验证
+```
+
+### 7.9 指标与可观测
 
 - `proagent.inspection.runs_total{status,target,kind}`
 - `proagent.tool.calls_total{tool,decision}`
@@ -618,15 +796,16 @@ audit:
 **目标**：端到端跑通"单机只读巡检 + IM 问答"，验证架构。
 
 - M1.1 仓库整理：新建 `proagent/` 根目录，设计骨架，确定依赖收敛
-- M1.2 Gateway 精简：启用 Discord / WeChat / API / Cron / Webhook / CLI；其他标记 disabled
-- M1.3 Policy Guard v1：allowlist / denylist / 审计表
+- M1.2 Gateway 精简：启用 Discord / WeChat / Feishu / API / Cron / Webhook / CLI；其他标记 disabled
+- M1.3 Policy Guard v1：denylist 模式 + 审计表
 - M1.4 Domain Pack 加载器：读取 `pack.yaml` 装配 knowledge / skills / tools
-- M1.5 工具集：实现 11 个 read_only 工具 + 4 个 suggest 工具
+- M1.5 工具集：实现 read_only shell 执行器（denylist 守护）+ 4 个 suggest 工具
 - M1.6 Skills：9 个只读 SOP 技能
 - M1.7 巡检流程：Cron 路径 + Webhook 路径 + IM 问答路径
 - M1.8 审计：`audit_event` / `inspection_run` 表
-- M1.9 联调：本地 + SSH 目标
-- M1.10 文档：用户指南、Domain Pack 开发指南、Policy 编写指南
+- M1.9 CLI 配置向导：`proagent model` / `proagent target` / `proagent setup`
+- M1.10 联调：本地 + SSH 目标
+- M1.11 文档：用户指南、Domain Pack 开发指南、Policy 编写指南
 
 ### Phase 2 — 多主机 + 权限分级 + 审批流
 
