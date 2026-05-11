@@ -564,7 +564,12 @@ def cmd_gateway(args):
     intents = discord.Intents.default()
     intents.message_content = True
 
-    client = discord.Client(intents=intents)
+    # Detect proxy from environment (discord.py/aiohttp doesn't auto-read env vars)
+    proxy_url = os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY") or os.environ.get("ALL_PROXY") or ""
+    if proxy_url:
+        print(f"   🌐 Using proxy: {proxy_url}")
+
+    client = discord.Client(intents=intents, proxy=proxy_url if proxy_url else None)
 
     # Per-user conversation agents
     user_agents: Dict[int, ProAgent] = {}  # type: ignore
