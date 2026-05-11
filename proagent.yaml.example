@@ -43,18 +43,15 @@ gateways:
 
 # Target servers
 targets:
-  default: local
+  default: web-01
   hosts:
-    - id: local
-      backend: local
-
     # SSH target example:
-    # - id: web-01
-    #   backend: ssh
-    #   host: 10.0.0.11
-    #   user: ops
+   - id: web-01
+     backend: ssh
+     host: 10.11.4.13
+     user: yuyonghao
     #   port: 22
-    #   keyfile: ~/.ssh/id_ed25519
+     keyfile: ~/.ssh/id_ed25519
     #   role: web
     #   owner: zhangsan
     #   note: Production web frontend

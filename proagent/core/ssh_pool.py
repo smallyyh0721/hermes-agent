@@ -75,9 +75,14 @@ class SSHConnection:
     """
 
     # SSH options for security and stability
-    SSH_OPTIONS = [
+    # NOTE: ControlMaster is Linux/macOS only. On Windows, each command
+    # spawns a fresh SSH connection (still fast with key auth).
+    _CONTROLMASTER_OPTIONS = [
         ("ControlMaster", "auto"),
         ("ControlPersist", "600"),          # Keep connection alive 10 min after last use
+    ]
+
+    _COMMON_OPTIONS = [
         ("BatchMode", "yes"),               # No interactive prompts
         ("StrictHostKeyChecking", "accept-new"),  # Accept new keys, reject changed
         ("ConnectTimeout", "15"),           # Connection timeout
@@ -91,15 +96,21 @@ class SSHConnection:
     ]
 
     def __init__(self, target: TargetHost, control_dir: Path = None):
+        import platform as _platform
         self.target = target
-        self.control_dir = control_dir or Path(tempfile.gettempdir()) / "proagent-ssh"
-        self.control_dir.mkdir(parents=True, exist_ok=True)
+        self._is_windows = _platform.system() == "Windows"
 
-        # Short deterministic socket name (avoid sun_path 104-byte limit on macOS)
-        socket_id = hashlib.sha256(
-            f"{target.user}@{target.host}:{target.port}".encode()
-        ).hexdigest()[:16]
-        self.control_socket = self.control_dir / f"{socket_id}.sock"
+        if not self._is_windows:
+            self.control_dir = control_dir or Path(tempfile.gettempdir()) / "proagent-ssh"
+            self.control_dir.mkdir(parents=True, exist_ok=True)
+            # Short deterministic socket name (avoid sun_path 104-byte limit on macOS)
+            socket_id = hashlib.sha256(
+                f"{target.user}@{target.host}:{target.port}".encode()
+            ).hexdigest()[:16]
+            self.control_socket = self.control_dir / f"{socket_id}.sock"
+        else:
+            self.control_dir = None
+            self.control_socket = None
 
         self.state = ConnectionState.DISCONNECTED
         self.last_error = ""
@@ -108,9 +119,16 @@ class SSHConnection:
     def _build_ssh_cmd(self, extra_args: List[str] = None) -> List[str]:
         """Build SSH command with all security and stability options."""
         cmd = ["ssh"]
-        cmd.extend(["-o", f"ControlPath={self.control_socket}"])
-        for key, value in self.SSH_OPTIONS:
+
+        # ControlMaster only on Unix (Windows OpenSSH doesn't support Unix sockets)
+        if not self._is_windows and self.control_socket:
+            cmd.extend(["-o", f"ControlPath={self.control_socket}"])
+            for key, value in self._CONTROLMASTER_OPTIONS:
+                cmd.extend(["-o", f"{key}={value}"])
+
+        for key, value in self._COMMON_OPTIONS:
             cmd.extend(["-o", f"{key}={value}"])
+
         if self.target.port != 22:
             cmd.extend(["-p", str(self.target.port)])
         if self.target.keyfile:
@@ -164,7 +182,17 @@ class SSHConnection:
 
     def _check_alive(self) -> bool:
         """Check if the ControlMaster socket is still alive."""
-        if not self.control_socket.exists():
+        if self._is_windows:
+            # On Windows, no ControlMaster — just try a quick command
+            cmd = self._build_ssh_cmd()
+            cmd.append("echo alive")
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                return result.returncode == 0
+            except (subprocess.TimeoutExpired, OSError):
+                return False
+
+        if not self.control_socket or not self.control_socket.exists():
             return False
         cmd = ["ssh", "-o", f"ControlPath={self.control_socket}", "-O", "check",
                f"{self.target.user}@{self.target.host}"]
@@ -223,7 +251,7 @@ class SSHConnection:
     def disconnect(self) -> None:
         """Gracefully close the SSH connection."""
         with self._lock:
-            if self.control_socket.exists():
+            if not self._is_windows and self.control_socket and self.control_socket.exists():
                 try:
                     cmd = ["ssh", "-o", f"ControlPath={self.control_socket}",
                            "-O", "exit", f"{self.target.user}@{self.target.host}"]
