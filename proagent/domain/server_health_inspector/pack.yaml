@@ -1,0 +1,20 @@
+id: server-health-inspector
+version: 0.1.0
+display_name: 服务器健康巡检 Agent
+description: 单机 Linux 服务器健康巡检与问题诊断（只读）
+
+models:
+  planner:    { provider: openai, model: gpt-4.1-mini }
+  executor:   { provider: openai, model: gpt-4.1-mini }
+  summarizer: { provider: anthropic, model: claude-3-5-haiku-latest }
+
+gateways:
+  - discord
+  - api
+  - cron
+  - cli
+
+capabilities:
+  read_only: true
+  suggest: true
+  write_action: false

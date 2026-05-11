@@ -1,0 +1,104 @@
+# Server Health Inspector - Policy Guard Configuration
+# Phase 1: Read-only mode. All write operations are denied.
+
+default: deny
+
+allow_auto:
+  - read_only.*
+  - server_shell
+
+allow_auto_with_rate_limit:
+  - suggest.*   # 30 calls per user per hour
+
+require_approval:
+  - write_action.*
+
+forbidden:
+  - "*.delete_*"
+  - "*.drop_*"
+  - "*.rotate_secrets*"
+  - "*.exec_arbitrary_shell"
+  - "*.rm_rf*"
+
+sandbox:
+  shell:
+    mode: denylist
+    denylist_patterns:
+      # File/directory destruction
+      - "rm\\s+"
+      - "rmdir"
+      - "shred"
+      # Filesystem modification
+      - "mkfs"
+      - "dd\\s+.*of="
+      - ">[^>]"
+      - ">>"
+      - "tee\\s+"
+      - "truncate"
+      # Remote code execution
+      - "curl.*\\|\\s*(sh|bash)"
+      - "wget.*\\|\\s*(sh|bash)"
+      # Permission changes
+      - "chmod"
+      - "chown"
+      - "chgrp"
+      - "setfacl"
+      # Process control
+      - "kill\\s+"
+      - "pkill"
+      - "killall"
+      - "skill"
+      # System control
+      - "shutdown"
+      - "reboot"
+      - "poweroff"
+      - "halt"
+      - "init\\s+[0-6]"
+      # Service management (write operations)
+      - "systemctl\\s+(start|stop|restart|enable|disable|mask|unmask|daemon-reload)"
+      - "service\\s+\\S+\\s+(start|stop|restart)"
+      # Network modification
+      - "iptables"
+      - "nft\\s+"
+      - "ip\\s+(link|addr|route)\\s+(add|del|set|change)"
+      - "ifconfig\\s+\\S+\\s+(up|down)"
+      # Disk/volume modification
+      - "mount\\s+"
+      - "umount"
+      - "fdisk"
+      - "parted"
+      - "lvremove"
+      - "lvcreate"
+      - "lvextend"
+      - "vgremove"
+      - "pvremove"
+      # Package management
+      - "apt\\s+(install|remove|purge|autoremove)"
+      - "apt-get\\s+(install|remove|purge|autoremove)"
+      - "yum\\s+(install|remove|erase)"
+      - "dnf\\s+(install|remove|erase)"
+      - "pip\\s+install"
+      # User management
+      - "useradd"
+      - "userdel"
+      - "usermod"
+      - "passwd"
+      - "groupadd"
+      - "groupdel"
+      # Cron modification
+      - "crontab\\s+-[er]"
+      # Editor/interactive (would hang)
+      - "\\bvi\\b"
+      - "\\bvim\\b"
+      - "\\bnano\\b"
+      - "\\bemacs\\b"
+      # Dangerous patterns
+      - ":(){ :|:& };:"
+      - "\\$\\(.*\\)\\s*>"
+
+  timeout_sec: 30
+  max_output_kb: 256
+
+audit:
+  sinks: [sqlite]
+  fields: [ts, session_id, actor, tool, args_hash, decision, latency, result_hash]

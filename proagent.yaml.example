@@ -1,0 +1,61 @@
+# ProAgent Configuration Example
+# Copy this to proagent.yaml and customize for your environment.
+# Run `proagent setup` for interactive configuration.
+
+runtime:
+  domain: server-health-inspector
+  locale: zh-CN
+
+# Model configuration
+# Supports: openai, anthropic (more adapters available as optional plugins)
+models:
+  planner:
+    provider: openai
+    model: gpt-4.1-mini
+  executor:
+    provider: openai
+    model: gpt-4.1-mini
+  summarizer:
+    provider: openai
+    model: gpt-4.1-mini
+
+# Gateway configuration
+gateways:
+  discord:
+    enabled: true
+    # Set DISCORD_BOT_TOKEN in environment or .env file
+    # channels: [ops]
+  api:
+    enabled: true
+    bind: 127.0.0.1:8787
+  cron:
+    enabled: true
+    jobs:
+      - { name: hourly-quick, cron: "0 * * * *", skill: quick_health_check }
+      - { name: daily-full, cron: "0 9 * * *", skill: full_health_inspection }
+
+# Target servers
+targets:
+  default: local
+  hosts:
+    - id: local
+      backend: local
+
+    # SSH target example:
+    # - id: web-01
+    #   backend: ssh
+    #   host: 10.0.0.11
+    #   user: ops
+    #   port: 22
+    #   keyfile: ~/.ssh/id_ed25519
+    #   role: web
+    #   owner: zhangsan
+    #   note: Production web frontend
+
+# Policy configuration
+policy:
+  pack: default   # Uses domain pack's built-in policy.yaml
+
+# Audit configuration
+audit:
+  db: proagent/storage/audit.db

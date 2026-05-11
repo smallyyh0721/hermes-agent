@@ -1,0 +1,31 @@
+# ProAgent Phase 1 Gateway Profile
+# Only these platforms are enabled. All others are disabled.
+
+enabled:
+  - discord
+  - api
+  - webhook
+  - cron
+  - cli
+
+disabled:
+  - telegram
+  - whatsapp
+  - signal
+  - slack
+  - matrix
+  - mattermost
+  - sms
+  - bluebubbles
+  - homeassistant
+  - yuanbao
+  - dingtalk
+  - email
+  - qqbot
+  - wecom
+
+# Note: weixin and feishu are available but not enabled by default in Phase 1.
+# Enable them in proagent.yaml if needed.
+optional:
+  - weixin
+  - feishu
