@@ -35,9 +35,10 @@
 ## 存储监控（Ceph + JuiceFS）
 
 ### Ceph Metrics 获取
-- Ceph Exporter: `curl -s http://10.11.4.20:9283/metrics`
-- Node Exporter: `curl -s http://10.11.4.20:9100/metrics`
-- 关键前缀: `ceph_health_status`, `ceph_osd_`, `ceph_pg_`, `ceph_cluster_total_`
+- Node Exporter (含存储节点指标): `curl -s http://10.11.4.20:9100/metrics`
+- Ceph CLI (如可用): `ceph status`, `ceph osd tree`, `ceph health detail`
+- 关键 node_exporter 前缀: `node_disk_`, `node_filesystem_`, `node_network_`
+- Ceph 进程检查: `ps aux | grep ceph-osd`
 
 ### JuiceFS Metrics 获取
 - 客户端 Metrics: `curl -s http://localhost:9567/metrics`
@@ -51,10 +52,10 @@
 - 计算 avg: sum / count
 
 ### Ceph 诊断路径
-1. **集群不健康** → `ceph_health_status != 0` → 检查 OSD up/in → 检查 PG 状态
-2. **OSD down** → 确认哪个 OSD → 检查对应节点 disk IO / 网络
-3. **容量告急** → `ceph_cluster_total_used_bytes / total_bytes` → 找大 pool
-4. **延迟高** → `ceph_osd_apply_latency_ms` → 定位慢 OSD → 检查底层磁盘
+1. **集群不健康** → `ceph status` → 检查 OSD 进程 → 检查节点磁盘 IO
+2. **OSD down** → `ps aux | grep ceph-osd` → 检查对应节点 disk IO / 网络
+3. **容量告急** → `node_filesystem_avail_bytes` → 找满的磁盘
+4. **IO 高** → `node_disk_io_time_seconds_total` → 定位慢盘
 
 ### JuiceFS 诊断路径
 1. **读写慢** → `juicefs_object_request_durations` → 确认是对象存储还是元数据

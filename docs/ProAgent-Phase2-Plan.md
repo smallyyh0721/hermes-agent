@@ -130,8 +130,7 @@ Agent: 正在检查 web-01, web-02...（并行执行）
 
 | 组件 | Metrics 端点 | 部署位置 | 关键指标 |
 |------|-------------|---------|---------|
-| Ceph (ceph-exporter) | `http://10.11.4.20:9283/metrics` | Ceph 集群节点 | 健康状态/OSD/PG/IOPS/容量 |
-| Node Exporter | `http://10.11.4.20:9100/metrics` | 同上 | 磁盘IO/网络/CPU（存储节点视角） |
+| Node Exporter (含 Ceph) | `http://10.11.4.20:9100/metrics` | Ceph/存储节点 | 磁盘IO/网络/CPU + Ceph 相关 |
 | JuiceFS | `http://localhost:9567/metrics` | 各客户端节点 | 读写延迟/缓存命中/元数据操作 |
 
 #### 2.2.2 工作流程
@@ -201,10 +200,7 @@ Agent: 正在检查 web-01, web-02...（并行执行）
 Agent 通过 `server_shell` 工具执行 `curl` 获取 metrics，然后由 LLM 解析 Prometheus text format：
 
 ```bash
-# Ceph metrics（在 ceph 节点上执行）
-server_shell(command="curl -s http://10.11.4.20:9283/metrics | grep -E '^ceph_(health|osd_up|osd_in|pg_|cluster_total)' | head -50")
-
-# Node metrics（存储节点）
+# Node Exporter（存储节点，含磁盘/网络/CPU）
 server_shell(command="curl -s http://10.11.4.20:9100/metrics | grep -E '^node_(disk_io|filesystem_avail|network)' | head -50")
 
 # JuiceFS metrics（客户端节点）
