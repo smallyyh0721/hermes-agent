@@ -64,7 +64,21 @@ class ProAgent:
         base_url: str = "",
         max_tokens: int = 4096,
     ):
-        self.provider = provider.lower()
+        from proagent.core.providers import resolve_provider
+
+        # Resolve provider to canonical form + default base URL
+        profile = resolve_provider(provider)
+        if profile:
+            self.provider = profile.id
+            self.api_mode = profile.api_mode  # "openai" | "anthropic"
+            # Use profile base_url if caller didn't specify one
+            if not base_url and profile.base_url:
+                base_url = profile.base_url
+        else:
+            self.provider = provider.lower()
+            # Fallback: infer api_mode from provider name
+            self.api_mode = "anthropic" if "anthropic" in self.provider or "claude" in self.provider else "openai"
+
         self.model = model
         self.system_prompt = system_prompt
         self.tools = tools or []
@@ -72,24 +86,32 @@ class ProAgent:
         self.messages: List[Message] = []
 
         # Store API credentials
-        self.api_key = api_key or self._resolve_api_key()
+        self.api_key = api_key or self._resolve_api_key(profile)
         self.base_url = base_url
 
         # Validate
         if not self.api_key:
+            env_var = profile.env_vars[0] if profile and profile.env_vars else "API_KEY"
             raise RuntimeError(
                 f"No API key found for provider '{self.provider}'. "
-                f"Set {'OPENAI_API_KEY' if self.provider == 'openai' else 'ANTHROPIC_API_KEY'} "
-                "environment variable."
+                f"Set {env_var} environment variable."
             )
 
         self._tool_map = {t.name: t for t in self.tools}
 
-    def _resolve_api_key(self) -> str:
+    def _resolve_api_key(self, profile=None) -> str:
+        if profile and profile.env_vars:
+            for env_var in profile.env_vars:
+                val = os.environ.get(env_var, "")
+                if val:
+                    return val
+        # Legacy fallback
         if self.provider == "openai":
             return os.environ.get("OPENAI_API_KEY", "")
         elif self.provider == "anthropic":
             return os.environ.get("ANTHROPIC_API_KEY", "")
+        elif self.provider == "minimax-cn":
+            return os.environ.get("MINIMAX_CN_API_KEY", "")
         return ""
 
     def reset(self) -> None:
@@ -110,12 +132,12 @@ class ProAgent:
 
         # Iterate up to MAX_ITERATIONS rounds of tool calls
         for iteration in range(self.MAX_ITERATIONS):
-            if self.provider == "openai":
+            if self.api_mode == "openai":
                 response = self._call_openai()
-            elif self.provider == "anthropic":
+            elif self.api_mode == "anthropic":
                 response = self._call_anthropic()
             else:
-                return f"❌ Unsupported provider: {self.provider}"
+                return f"❌ Unsupported api_mode: {self.api_mode}"
 
             if response.tool_calls:
                 # Execute tools, add results to history, loop
@@ -266,7 +288,11 @@ class ProAgent:
         except ImportError:
             raise RuntimeError("anthropic package not installed. Run: pip install anthropic")
 
-        client = Anthropic(api_key=self.api_key)
+        client_kwargs = {"api_key": self.api_key}
+        if self.base_url:
+            client_kwargs["base_url"] = self.base_url
+
+        client = Anthropic(**client_kwargs)
 
         # Build messages in Anthropic format
         anth_messages = []

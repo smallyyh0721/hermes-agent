@@ -64,24 +64,37 @@ python proagent/tests/test_basic.py
 
 ## 1. 配置模型
 
-### 1.1 设置 API Key
+### 1.1 支持的 Provider（Phase 1）
+
+| Provider | Env Var | Base URL | 适用场景 |
+|----------|---------|----------|---------|
+| `minimax-cn` | `MINIMAX_CN_API_KEY` | `https://api.minimaxi.com/anthropic` | **默认推荐**，大陆用户首选 |
+| `openai` | `OPENAI_API_KEY` | (SDK 默认) | 海外、对接 OpenAI |
+| `anthropic` | `ANTHROPIC_API_KEY` | (SDK 默认) | 海外、对接 Anthropic |
+
+三个 Provider 都已在 `proagent/core/providers.py` 注册，通过 `proagent_run.py setup` 会交互式选择。
+
+### 1.2 设置 API Key
 
 选一种即可：
 
 ```bash
+# MiniMax CN（推荐，大陆直连）
+export MINIMAX_CN_API_KEY="..."
+
 # OpenAI
 export OPENAI_API_KEY="sk-..."
 
-# 或 Anthropic
+# Anthropic
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
 Windows PowerShell：
 ```powershell
-$env:OPENAI_API_KEY="sk-..."
+$env:MINIMAX_CN_API_KEY="..."
 ```
 
-### 1.2 生成配置文件
+### 1.3 生成配置文件
 
 **方式 A：交互式（推荐）**
 ```bash
@@ -89,9 +102,10 @@ python proagent_run.py setup
 ```
 
 按提示填写：
-- Provider: `openai`（或 `anthropic`）
-- Model: `gpt-4.1-mini`（默认，性价比高）
-- Backend: `ssh`
+- Provider: 选 `[3] MiniMax China`（默认）、`[1] OpenAI` 或 `[2] Anthropic`
+- Model: 保持默认（MiniMax-M2.7 / gpt-4.1-mini / claude-3-5-haiku-latest）
+- API Key: 如果环境变量已设置会自动识别；否则粘贴进去
+- Backend: `ssh`（或 `local` 用于测试本机）
 - Host/User/Port/Keyfile: 目标服务器信息
 - Target ID: 给这台服务器起个名字，例如 `web-01`
 - Discord Bot Token: 可以先跳过，后面再配
@@ -99,25 +113,32 @@ python proagent_run.py setup
 **方式 B：复制示例**
 ```bash
 cp proagent.yaml.example proagent.yaml
-# 然后手动编辑
+# 默认已配成 MiniMax CN，编辑 targets 部分填入你的服务器
 ```
 
-### 1.3 验证模型连通性
+### 1.4 验证模型连通性
 
 ```bash
-python proagent_run.py model show
-python proagent_run.py model test
+python proagent_run.py model show    # 列出当前配置 + 可选 provider
+python proagent_run.py model test    # 发测试请求（支持三种 provider）
 ```
 
-期望：
+期望（以 MiniMax CN 为例）：
 ```
 📦 Model Configuration
-  Planner:    openai/gpt-4.1-mini
-  Executor:   openai/gpt-4.1-mini
-  Summarizer: openai/gpt-4.1-mini
+  Planner:    minimax-cn/MiniMax-M2.7
+  Executor:   minimax-cn/MiniMax-M2.7
+  Summarizer: minimax-cn/MiniMax-M2.7
+
+Supported providers:
+  - openai: OpenAI
+  - anthropic: Anthropic
+  - minimax-cn: MiniMax China (mainland China endpoint)
 
 🔌 Testing model connectivity...
-  Testing openai/gpt-4.1-mini...
+  Provider: MiniMax China (mainland China endpoint)
+  Model:    MiniMax-M2.7
+  Base URL: https://api.minimaxi.com/anthropic
   ✅ Connected! Response: ok
 ```
 

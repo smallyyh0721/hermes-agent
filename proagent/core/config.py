@@ -209,6 +209,14 @@ def _expand_env(value: str) -> str:
     return value
 
 
+def _model_dict(mc: ModelConfig) -> Dict[str, Any]:
+    """Serialize a ModelConfig, only including non-empty optional fields."""
+    d = {"provider": mc.provider, "model": mc.model}
+    if mc.base_url:
+        d["base_url"] = mc.base_url
+    return d
+
+
 def save_config(config: ProAgentConfig, config_path: Path) -> None:
     """Save ProAgent configuration to YAML file."""
     data = {
@@ -217,9 +225,9 @@ def save_config(config: ProAgentConfig, config_path: Path) -> None:
             "locale": config.locale,
         },
         "models": {
-            "planner": {"provider": config.models.planner.provider, "model": config.models.planner.model},
-            "executor": {"provider": config.models.executor.provider, "model": config.models.executor.model},
-            "summarizer": {"provider": config.models.summarizer.provider, "model": config.models.summarizer.model},
+            "planner": _model_dict(config.models.planner),
+            "executor": _model_dict(config.models.executor),
+            "summarizer": _model_dict(config.models.summarizer),
         },
         "gateways": {
             name: {"enabled": gw.enabled, **gw.settings}

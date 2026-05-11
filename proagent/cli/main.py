@@ -219,32 +219,54 @@ def _run_repl_from_runtime(runtime, config):
 
 def cmd_setup(args):
     """Interactive setup wizard."""
+    from proagent.core.providers import list_providers, resolve_provider
+
     print("🔧 ProAgent Setup Wizard")
     print("=" * 50)
     print()
 
     # Step 1: Model configuration
-    print("Step 1: Model Configuration")
+    print("Step 1: Model Provider")
     print("-" * 30)
-    provider = input("  Provider [openai]: ").strip() or "openai"
-    model = input("  Model [gpt-4.1-mini]: ").strip() or "gpt-4.1-mini"
+    providers = list_providers()
+    for idx, p in enumerate(providers, 1):
+        default_mark = " [default]" if p.id == "minimax-cn" else ""
+        print(f"  [{idx}] {p.display_name}{default_mark}")
+        if p.notes:
+            print(f"      ↳ {p.notes}")
+    print()
+    choice = input("  Select provider [1-3, default=3]: ").strip() or "3"
+    try:
+        provider_idx = int(choice) - 1
+        if not (0 <= provider_idx < len(providers)):
+            provider_idx = 2  # default to minimax-cn (index 2)
+    except ValueError:
+        provider_idx = 2
 
-    api_key_env = "OPENAI_API_KEY" if provider == "openai" else "ANTHROPIC_API_KEY"
-    existing_key = os.environ.get(api_key_env, "")
+    selected = providers[provider_idx]
+    print(f"  ✓ Selected: {selected.display_name}")
+    print()
+
+    model = input(f"  Model [{selected.default_model}]: ").strip() or selected.default_model
+
+    # API key
+    primary_env = selected.env_vars[0]
+    existing_key = os.environ.get(primary_env, "")
     if existing_key:
-        print(f"  ✅ {api_key_env} found in environment")
+        print(f"  ✅ {primary_env} found in environment")
     else:
-        api_key = input(f"  {api_key_env}: ").strip()
+        print(f"  Get your API key from: {selected.signup_url}")
+        api_key = input(f"  {primary_env}: ").strip()
         if api_key:
-            os.environ[api_key_env] = api_key
+            os.environ[primary_env] = api_key
     print()
 
     # Step 2: Target configuration
     print("Step 2: Target Server")
     print("-" * 30)
-    backend = input("  Backend [local/ssh]: ").strip() or "local"
+    backend = input("  Backend [local/ssh, default=local]: ").strip() or "local"
 
-    target_config = {"id": "default", "backend": backend}
+    target_config = {"id": "local", "backend": backend, "host": "", "user": ""}
     if backend == "ssh":
         target_config["host"] = input("  Host: ").strip()
         target_config["user"] = input("  User: ").strip()
@@ -265,12 +287,18 @@ def cmd_setup(args):
     from proagent.core.config import ProAgentConfig, ModelConfig, ModelsConfig, GatewayConfig, save_config
     from proagent.core.ssh_pool import TargetHost
 
+    model_cfg = ModelConfig(
+        provider=selected.id,
+        model=model,
+        base_url=selected.base_url,
+    )
+
     config = ProAgentConfig(
         domain="server-health-inspector",
         models=ModelsConfig(
-            planner=ModelConfig(provider=provider, model=model),
-            executor=ModelConfig(provider=provider, model=model),
-            summarizer=ModelConfig(provider=provider, model=model),
+            planner=model_cfg,
+            executor=model_cfg,
+            summarizer=model_cfg,
         ),
         default_target=target_config["id"],
         targets=[TargetHost(**target_config)],
@@ -293,6 +321,7 @@ def cmd_setup(args):
 def cmd_model(args):
     """Model configuration commands."""
     from proagent.core.config import load_config
+    from proagent.core.providers import list_providers, resolve_provider
 
     config = load_config()
 
@@ -303,34 +332,49 @@ def cmd_model(args):
         print(f"  Planner:    {config.models.planner.provider}/{config.models.planner.model}")
         print(f"  Executor:   {config.models.executor.provider}/{config.models.executor.model}")
         print(f"  Summarizer: {config.models.summarizer.provider}/{config.models.summarizer.model}")
+        print()
+        print("Supported providers:")
+        for p in list_providers():
+            print(f"  - {p.id}: {p.display_name}")
 
     elif action == "test":
         print("🔌 Testing model connectivity...")
-        # Quick test by trying to import and instantiate
         mc = config.models.executor
-        print(f"  Testing {mc.provider}/{mc.model}...")
+        profile = resolve_provider(mc.provider)
+        if not profile:
+            print(f"  ❌ Unknown provider: {mc.provider}")
+            return
+
+        print(f"  Provider: {profile.display_name}")
+        print(f"  Model:    {mc.model}")
+        if mc.base_url or profile.base_url:
+            print(f"  Base URL: {mc.base_url or profile.base_url}")
+
         try:
-            import openai
-            client = openai.OpenAI()
-            resp = client.chat.completions.create(
+            from proagent.core.agent import ProAgent
+            agent = ProAgent(
+                provider=mc.provider,
                 model=mc.model,
-                messages=[{"role": "user", "content": "Say 'ok'"}],
-                max_tokens=5,
+                system_prompt="You are a test assistant. Reply with exactly 'ok'.",
+                tools=[],
+                base_url=mc.base_url,
             )
-            print(f"  ✅ Connected! Response: {resp.choices[0].message.content}")
+            response = agent.chat("ping")
+            print(f"  ✅ Connected! Response: {response.strip()[:100]}")
         except Exception as e:
             print(f"  ❌ Failed: {e}")
 
     elif action == "set":
         parts = args.model_spec.split(":", 1)
         if len(parts) == 2:
-            provider, model = parts
+            provider_raw, model = parts
+            profile = resolve_provider(provider_raw)
+            provider = profile.id if profile else provider_raw
         else:
             provider = "openai"
             model = parts[0]
         print(f"  Setting {args.role} → {provider}/{model}")
-        # Would save to config here
-        print("  ✅ Updated (restart proagent to apply)")
+        print("  ℹ️  Note: This currently displays only; edit proagent.yaml to persist.")
 
 
 def cmd_target(args):

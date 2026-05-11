@@ -7,17 +7,24 @@ runtime:
   locale: zh-CN
 
 # Model configuration
-# Supports: openai, anthropic (more adapters available as optional plugins)
+# Phase 1 supports three providers:
+#   - openai       (OPENAI_API_KEY)         - OpenAI chat completions
+#   - anthropic    (ANTHROPIC_API_KEY)      - Anthropic Messages API
+#   - minimax-cn   (MINIMAX_CN_API_KEY)     - MiniMax China endpoint
+#                                             (Anthropic-compatible)
 models:
   planner:
-    provider: openai
-    model: gpt-4.1-mini
+    provider: minimax-cn
+    model: MiniMax-M2.7
+    base_url: https://api.minimaxi.com/anthropic
   executor:
-    provider: openai
-    model: gpt-4.1-mini
+    provider: minimax-cn
+    model: MiniMax-M2.7
+    base_url: https://api.minimaxi.com/anthropic
   summarizer:
-    provider: openai
-    model: gpt-4.1-mini
+    provider: minimax-cn
+    model: MiniMax-M2.7
+    base_url: https://api.minimaxi.com/anthropic
 
 # Gateway configuration
 gateways:
