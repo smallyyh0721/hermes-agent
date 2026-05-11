@@ -31,8 +31,9 @@ sandbox:
       # Filesystem modification
       - "mkfs"
       - "dd\\s+.*of="
-      - ">[^>]"
-      - ">>"
+      # Block output redirection to real files, but allow >/dev/null and 2>/dev/null
+      - "\\d*>\\s*(?!/dev/null)[^&\\s]"
+      - ">>\\s*(?!/dev/null)"
       - "tee\\s+"
       - "truncate"
       # Remote code execution
