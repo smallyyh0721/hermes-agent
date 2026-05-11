@@ -31,3 +31,32 @@
 4. **IO 高** → `iostat -x 1 3` → 确认 await/util → `iotop`(如有) → 定位进程
 5. **网络问题** → `ss -s` → 连接状态统计 → `ss -tunap` → 具体连接 → `ping/traceroute`
 6. **服务异常** → `systemctl --failed` → `journalctl -u <service> --since "1h ago"`
+
+## 存储监控（Ceph + JuiceFS）
+
+### Ceph Metrics 获取
+- Ceph Exporter: `curl -s http://10.11.4.20:9283/metrics`
+- Node Exporter: `curl -s http://10.11.4.20:9100/metrics`
+- 关键前缀: `ceph_health_status`, `ceph_osd_`, `ceph_pg_`, `ceph_cluster_total_`
+
+### JuiceFS Metrics 获取
+- 客户端 Metrics: `curl -s http://localhost:9567/metrics`
+- 关键前缀: `juicefs_object_request_`, `juicefs_blockcache_`, `juicefs_transaction_`, `juicefs_used_`
+
+### Prometheus Text Format 解析要点
+- 每行格式: `metric_name{label="value"} numeric_value`
+- `# HELP` 行是描述，`# TYPE` 行是类型（counter/gauge/histogram）
+- histogram 有 `_bucket`, `_sum`, `_count` 后缀
+- 计算 P99: 从 bucket 累积分布中插值
+- 计算 avg: sum / count
+
+### Ceph 诊断路径
+1. **集群不健康** → `ceph_health_status != 0` → 检查 OSD up/in → 检查 PG 状态
+2. **OSD down** → 确认哪个 OSD → 检查对应节点 disk IO / 网络
+3. **容量告急** → `ceph_cluster_total_used_bytes / total_bytes` → 找大 pool
+4. **延迟高** → `ceph_osd_apply_latency_ms` → 定位慢 OSD → 检查底层磁盘
+
+### JuiceFS 诊断路径
+1. **读写慢** → `juicefs_object_request_durations` → 确认是对象存储还是元数据
+2. **缓存命中低** → `juicefs_blockcache_hits/(hits+miss)` → 检查缓存大小配置
+3. **元数据慢** → `juicefs_transaction_durations` → 检查 Redis/TiKV 状态

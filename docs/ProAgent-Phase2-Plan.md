@@ -122,82 +122,96 @@ Agent: 正在检查 web-01, web-02...（并行执行）
 
 ---
 
-### 2.2 告警接入
+### 2.2 存储监控（Ceph + JuiceFS）
 
-**目标**：外部监控系统推送告警 → Agent 自动诊断 → 推送结果到 Discord/Feishu。
+**目标**：通过 Prometheus metrics 端点获取 Ceph/JuiceFS 状态，Agent 定期巡检 + 异常时 Discord 汇报并询问是否深入分析。
 
-#### 2.2.1 Webhook 接口
+#### 2.2.1 监控数据源
 
-```
-POST /webhook/alert
-Content-Type: application/json
+| 组件 | Metrics 端点 | 部署位置 | 关键指标 |
+|------|-------------|---------|---------|
+| Ceph (ceph-exporter) | `http://10.11.4.20:9283/metrics` | Ceph 集群节点 | 健康状态/OSD/PG/IOPS/容量 |
+| Node Exporter | `http://10.11.4.20:9100/metrics` | 同上 | 磁盘IO/网络/CPU（存储节点视角） |
+| JuiceFS | `http://localhost:9567/metrics` | 各客户端节点 | 读写延迟/缓存命中/元数据操作 |
 
-{
-  "source": "alertmanager",     // alertmanager | zabbix | prometheus | custom
-  "severity": "warning",        // critical | warning | info
-  "target": "web-01",           // 匹配 proagent.yaml 中的 target id
-  "metric": "disk_usage",       // 触发指标
-  "value": "92%",               // 当前值
-  "threshold": "90%",           // 阈值
-  "message": "/data 分区使用率超过 90%",
-  "labels": {
-    "instance": "10.11.4.13:9100",
-    "mountpoint": "/data"
-  }
-}
-```
-
-#### 2.2.2 告警处理流程
+#### 2.2.2 工作流程
 
 ```
-Alertmanager/Zabbix/Prometheus
+定时巡检 / 用户提问
         │
-        ▼ POST /webhook/alert
+        ▼
 ┌─────────────────────────────┐
-│  Alert Router               │
-│  - 解析 source 格式         │
-│  - 匹配 target              │
-│  - 确定 severity → skill    │
+│  Metrics Fetcher (read_only)│
+│  curl → parse Prometheus    │
+│  text format → 结构化数据   │
 └───────────┬─────────────────┘
             ▼
 ┌─────────────────────────────┐
-│  ProAgent Runtime           │
-│  - 选择对应 diagnose skill  │
-│  - 执行 read_only 命令      │
-│  - 生成诊断报告             │
+│  Agent 分析                 │
+│  - 对比阈值                 │
+│  - 识别异常模式             │
+│  - 生成状态摘要             │
 └───────────┬─────────────────┘
             ▼
+        正常？──Yes──→ 记录，不打扰
+            │
+           No
+            ▼
 ┌─────────────────────────────┐
-│  Delivery                   │
-│  - Discord channel 推送     │
-│  - Feishu 群消息            │
-│  - 存入 incident_history    │
-│  - 更新 audit_event         │
+│  Discord 汇报               │
+│  "发现 Ceph OSD.3 down，    │
+│   是否需要进一步分析？"      │
+│  [详细分析] [忽略]           │
+└───────────┬─────────────────┘
+            ▼ 用户点击"详细分析"
+┌─────────────────────────────┐
+│  深度诊断（只读）            │
+│  - ceph status              │
+│  - ceph osd tree            │
+│  - ceph health detail       │
+│  - 相关 node metrics        │
+│  → 给出根因假设 + 建议方案  │
+│  → 不执行任何修复操作        │
 └─────────────────────────────┘
 ```
 
-#### 2.2.3 Alertmanager 适配
+#### 2.2.3 Ceph 关键指标与阈值
 
-```yaml
-# alertmanager.yml 配置示例
-receivers:
-  - name: proagent
-    webhook_configs:
-      - url: http://proagent-host:8787/webhook/alert
-        send_resolved: true
+| 指标 | Prometheus metric | 注意阈值 | 异常阈值 |
+|------|------------------|---------|---------|
+| 集群健康 | `ceph_health_status` | ≠ 0 (WARN) | = 2 (ERR) |
+| OSD 状态 | `ceph_osd_up`, `ceph_osd_in` | any down | >1 down |
+| PG 状态 | `ceph_pg_degraded`, `ceph_pg_undersized` | > 0 | 持续 > 5min |
+| 容量 | `ceph_cluster_total_used_bytes / total_bytes` | > 75% | > 85% |
+| IOPS | `ceph_osd_op_r`, `ceph_osd_op_w` | 突增 2x | 突增 5x |
+| 延迟 | `ceph_osd_apply_latency_ms` | > 20ms | > 100ms |
 
-route:
-  receiver: proagent
-  group_by: [alertname, instance]
-  group_wait: 30s
+#### 2.2.4 JuiceFS 关键指标与阈值
+
+| 指标 | Prometheus metric | 注意阈值 | 异常阈值 |
+|------|------------------|---------|---------|
+| 读延迟 | `juicefs_object_request_durations_histogram_seconds` | P99 > 100ms | P99 > 500ms |
+| 写延迟 | 同上 (method=put) | P99 > 200ms | P99 > 1s |
+| 缓存命中率 | `juicefs_blockcache_hits / (hits+miss)` | < 80% | < 50% |
+| 元数据操作 | `juicefs_transaction_durations_histogram_seconds` | P99 > 50ms | P99 > 200ms |
+| 使用空间 | `juicefs_used_space` | 接近 quota | 超过 quota |
+
+#### 2.2.5 实现方式
+
+Agent 通过 `server_shell` 工具执行 `curl` 获取 metrics，然后由 LLM 解析 Prometheus text format：
+
+```bash
+# Ceph metrics（在 ceph 节点上执行）
+server_shell(command="curl -s http://10.11.4.20:9283/metrics | grep -E '^ceph_(health|osd_up|osd_in|pg_|cluster_total)' | head -50")
+
+# Node metrics（存储节点）
+server_shell(command="curl -s http://10.11.4.20:9100/metrics | grep -E '^node_(disk_io|filesystem_avail|network)' | head -50")
+
+# JuiceFS metrics（客户端节点）
+server_shell(command="curl -s http://localhost:9567/metrics | grep -E '^juicefs_(object_request|blockcache|transaction|used)' | head -50")
 ```
 
-#### 2.2.4 告警去重与抑制
-
-- 同一 target + metric 在 5 分钟内不重复诊断
-- severity=info 只记录不诊断
-- severity=critical 立即诊断 + 推送
-- resolved 事件关闭 incident
+**注意**：所有操作均为只读（curl GET），不执行任何 ceph/juicefs 写命令。
 
 ---
 
@@ -313,6 +327,12 @@ GPU 状态报告：型号、温度、利用率、显存、功耗
 │  │  └── policy.yaml         (57 条 denylist 规则)               │    │
 │  └─────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────┐    │
+│  │  [Phase 2] Storage Monitor (Ceph + JuiceFS)                  │    │
+│  │  - curl Prometheus metrics (read-only GET)                   │    │
+│  │  - Ceph: :9283 + :9100 | JuiceFS: :9567                     │    │
+│  │  - 阈值判定 → Discord 汇报 → 询问深入分析                   │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────────┐    │
 │  │  [Phase 2] Skill Generator                                   │    │
 │  │  - 模式检测 → 草稿生成 → 人工审核 → 注册                    │    │
 │  └─────────────────────────────────────────────────────────────┘    │
@@ -362,7 +382,8 @@ hermes-agent/
 │   │   ├── providers.py            # LLM Provider 注册表（minimax-cn/openai/anthropic）
 │   │   ├── runtime.py              # 编排器：Config + SSH + Policy + Domain → Agent
 │   │   ├── ssh_pool.py             # SSH 连接池（ControlMaster/Windows 兼容/重连）
-│   │   ├── alert_router.py         # [Phase 2] 告警路由：解析 → 匹配 target → 触发 skill
+│   │   ├── alert_router.py         # [Phase 2] 告警路由（预留，暂不实现）
+│   │   ├── metrics_fetcher.py      # [Phase 2] Prometheus metrics 抓取与解析
 │   │   └── target_import.py        # [Phase 2] 批量导入 hosts.yaml / 网段扫描
 │   │
 │   ├── policy/                     # ── 安全与审计 ──
@@ -429,17 +450,17 @@ hermes-agent/
 | M2.1 | 多主机批量导入 | `target import hosts.yaml` + range 语法 + `--all` 测试 | 2 天 |
 | M2.2 | Target Group | 按 role/tag 筛选 + 并行执行 | 2 天 |
 | M2.3 | 连接池优化 | 并行连接 + 健康检查 + 自动重连 | 2 天 |
-| M2.4 | Webhook 告警接口 | `POST /webhook/alert` + Alertmanager 适配 | 3 天 |
-| M2.5 | 告警路由 + 自动诊断 | severity → skill 映射 + 去重 | 2 天 |
-| M2.6 | 诊断结果推送 | Discord/Feishu 自动推送 + incident_history | 2 天 |
+| M2.4 | Ceph Metrics 巡检 | curl 9283/9100 → 解析 → 阈值判定 → 报告 | 3 天 |
+| M2.5 | JuiceFS Metrics 巡检 | curl 9567 → 解析 → 阈值判定 → 报告 | 2 天 |
+| M2.6 | 存储异常 Discord 汇报 | 发现问题 → 推送 → 询问是否深入 → 深度诊断 | 3 天 |
 | M2.7 | Skill 模式检测 | 识别重复命令序列 | 3 天 |
 | M2.8 | Skill 草稿生成 | 命令序列 → SKILL.md 模板 | 2 天 |
 | M2.9 | Skill 人工审核流 | Discord/Feishu 按钮 approve/reject | 2 天 |
-| M2.10 | 定时巡检推送 | Cron → 巡检 → Discord/Feishu 推送 | 2 天 |
+| M2.10 | 定时巡检推送 | Cron → 巡检(主机+存储) → Discord/Feishu 推送 | 2 天 |
 | M2.11 | Session 持久化 | 对话历史跨重启保留 | 1 天 |
-| M2.12 | 文档更新 | 部署指南 + 告警接入指南 + Skill 开发指南 | 2 天 |
+| M2.12 | 文档更新 | 部署指南 + 存储监控指南 + Skill 开发指南 | 2 天 |
 
-**总预估**: ~25 天（可并行，实际 2-3 周）
+**总预估**: ~24 天（可并行，实际 2-3 周）
 
 ---
 
@@ -447,11 +468,14 @@ hermes-agent/
 
 1. `python proagent_run.py target import hosts.yaml` 一次导入 20 台服务器
 2. `python proagent_run.py target test --all` 并行测试所有目标（< 30s）
-3. Alertmanager 发送告警 → 5s 内 Agent 开始诊断 → 30s 内推送结果到 Discord
-4. Agent 对同类问题诊断 3 次后，自动提议新 Skill
-5. 用户在 Discord 点击 ✅ 后，新 Skill 立即生效
-6. 定时巡检每小时推送到 Discord，格式结构化
-7. 连续运行 7 天无 SSH 连接泄漏
+3. Agent 能通过 curl 获取 Ceph metrics 并正确判断集群健康状态
+4. Agent 能通过 curl 获取 JuiceFS metrics 并分析读写延迟
+5. 发现存储异常时自动推送到 Discord，用户确认后给出深度分析（只读）
+6. Agent 对同类问题诊断 3 次后，自动提议新 Skill
+7. 用户在 Discord 点击 ✅ 后，新 Skill 立即生效
+8. 定时巡检（主机 + 存储）每小时推送到 Discord，格式结构化
+9. 连续运行 7 天无 SSH 连接泄漏
+10. **全程无任何写操作**（不执行 ceph osd repair / juicefs gc 等）
 
 ---
 
@@ -459,12 +483,15 @@ hermes-agent/
 
 | 决策点 | 选择 | 理由 |
 |--------|------|------|
-| 告警接口格式 | 兼容 Alertmanager webhook | 最广泛使用的开源告警系统 |
+| 存储监控方式 | curl Prometheus metrics endpoint | 纯只读 GET，无需额外 agent，复用现有 exporter |
+| Metrics 解析 | LLM 直接解析 Prometheus text format | 灵活，无需写 parser；Agent 可自行 grep 关键指标 |
+| 异常通知 | Discord 推送 + 询问是否深入 | 避免信息轰炸，用户决定是否深入 |
 | 并行执行 | ThreadPoolExecutor(10) | SSH 是 IO 密集，线程足够 |
 | Skill 存储 | 文件系统 (skills/*.md) | 可 git 管理、可 review、可回滚 |
 | 审核流 | Discord 按钮 / Feishu 卡片 | 用户已在这些平台，无需新 UI |
 | 定时任务 | OS cron 调用 proagent inspect | 最简单可靠，不引入新调度器 |
 | Session 持久化 | SQLite (messages 表) | 复用 audit.db 同一数据库 |
+| 写操作 | **全面禁止** | Phase 2 仍为只读；不执行 ceph repair / juicefs gc 等 |
 
 ---
 
@@ -473,9 +500,11 @@ hermes-agent/
 | 风险 | 缓解 |
 |------|------|
 | 20 台并行 SSH 连接不稳定 | 连接池 + 指数退避重连 + 健康检查 |
-| 告警风暴（短时间大量告警） | 去重窗口 5min + 批量合并 + 限流 |
+| Metrics endpoint 不可达 | curl 超时 5s + 标记为 unreachable + 不阻塞其他巡检 |
+| Prometheus text format 解析不准 | 用 grep 预过滤关键行，减少 LLM 输入噪音 |
 | Skill 自动生成质量差 | 必须人工审核；生成时引用 evidence |
 | Discord 代理不稳定 | 支持 Feishu 作为备用通道 |
+| Agent 误判存储异常 | 阈值保守设置；异常只汇报不执行 |
 
 ---
 

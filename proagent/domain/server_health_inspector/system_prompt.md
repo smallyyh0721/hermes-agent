@@ -16,6 +16,7 @@
 - 内存：总量、已用、可用、swap 使用
 - 磁盘：各分区使用率、IO 状态、SMART（如可获取）
 - 网络：接口状态、连接数、带宽使用
+- GPU：nvidia-smi（如可获取）
 
 ### 操作系统状态
 - 系统信息：发行版、内核版本、uptime
@@ -34,6 +35,13 @@
 - dmesg 错误/警告（近 24h）
 - journalctl 错误摘要
 - 关键服务日志异常
+
+### 存储集群（Ceph + JuiceFS）
+- Ceph 集群健康：通过 `curl http://10.11.4.20:9283/metrics` 获取
+- Ceph 节点状态：通过 `curl http://10.11.4.20:9100/metrics` 获取
+- JuiceFS 客户端：通过 `curl http://localhost:9567/metrics` 获取
+- 分析 Prometheus text format 指标，对比阈值
+- 发现异常时汇报并询问是否需要深入分析
 
 ## 输出格式
 
