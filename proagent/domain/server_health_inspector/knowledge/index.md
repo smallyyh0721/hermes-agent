@@ -45,6 +45,13 @@
 - 客户端 Metrics: `curl -s http://localhost:9567/metrics`
 - 关键前缀: `juicefs_object_request_`, `juicefs_blockcache_`, `juicefs_transaction_`, `juicefs_used_`
 
+### Kubernetes 访问
+- **kubectl 在 k8s-master (10.11.4.2) 上执行**
+- 命令格式: `server_shell(command="kubectl get ...", target="k8s-master")`
+- kubeconfig 位于 k8s-master 的 `~/.kube/config`（默认路径）
+- 只读命令: `kubectl get`, `kubectl describe`, `kubectl logs`, `kubectl top`
+- 禁止写命令: `kubectl delete/apply/patch/scale` 等（Policy Guard 拦截）
+
 ### Prometheus Text Format 解析要点
 - 每行格式: `metric_name{label="value"} numeric_value`
 - `# HELP` 行是描述，`# TYPE` 行是类型（counter/gauge/histogram）

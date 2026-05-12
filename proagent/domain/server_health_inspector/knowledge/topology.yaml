@@ -48,14 +48,14 @@ entities:
       metrics: "http://localhost:9567/metrics"
       notes: "200GB volume, backed by Ceph RBD"
 
-  # Kubernetes (fill in when kubeconfig is ready)
-  # kubernetes:
-  #   cluster-01:
-  #     type: k8s
-  #     api_server: https://10.11.4.x:6443
-  #     master_nodes: [k8s-master-01]
-  #     worker_nodes: [server-01, gpu-01]
-  #     namespaces: [default, training, monitoring]
+  # Kubernetes
+  kubernetes:
+    cluster-01:
+      type: k8s
+      api_server: https://10.11.4.2:6443
+      master_nodes: [k8s-master]
+      kubectl_target: k8s-master
+      notes: "kubectl 命令在 k8s-master (10.11.4.2) 上执行"
 
   services:
     # Add your services here
