@@ -83,13 +83,12 @@ class SSHConnection:
     ]
 
     _COMMON_OPTIONS = [
-        ("BatchMode", "yes"),               # No interactive prompts
+        ("ControlMaster", "no"),            # Override user's ssh_config ControlMaster
         ("StrictHostKeyChecking", "accept-new"),  # Accept new keys, reject changed
         ("ConnectTimeout", "15"),           # Connection timeout
         ("ServerAliveInterval", "30"),      # Keepalive every 30s
         ("ServerAliveCountMax", "3"),       # Disconnect after 3 missed keepalives
         ("TCPKeepAlive", "yes"),            # OS-level TCP keepalive
-        ("Compression", "yes"),             # Compress data (helps on slow links)
         ("LogLevel", "ERROR"),              # Suppress verbose SSH output
         ("ForwardAgent", "no"),             # Security: no agent forwarding
         ("ForwardX11", "no"),               # Security: no X11 forwarding
