@@ -36,9 +36,10 @@
 
 ### Ceph Metrics 获取
 - Node Exporter (含存储节点指标): `curl -s http://10.11.4.20:9100/metrics`
-- Ceph CLI (如可用): `ceph status`, `ceph osd tree`, `ceph health detail`
+- Ceph CLI (需要 sudo): `sudo ceph status`, `sudo ceph osd tree`, `sudo ceph health detail`
 - 关键 node_exporter 前缀: `node_disk_`, `node_filesystem_`, `node_network_`
 - Ceph 进程检查: `ps aux | grep ceph-osd`
+- **注意**: yuyonghao 用户无 ceph 权限，所有 ceph 命令必须加 `sudo`
 
 ### JuiceFS Metrics 获取
 - 客户端 Metrics: `curl -s http://localhost:9567/metrics`

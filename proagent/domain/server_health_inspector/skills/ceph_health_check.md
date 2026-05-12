@@ -35,8 +35,8 @@ server_shell(command="curl -s http://10.11.4.20:9100/metrics | grep -E '^node_(c
 ### Phase 5: Ceph 进程状态（通过 SSH 直接检查）
 ```
 server_shell(command="ps aux | grep -E '(ceph-osd|ceph-mon|ceph-mgr|ceph-mds)' | grep -v grep")
-server_shell(command="ceph status 2>/dev/null || echo 'ceph CLI not available on this node'")
-server_shell(command="ceph osd tree 2>/dev/null | head -30 || echo 'ceph CLI not available'")
+server_shell(command="sudo ceph status 2>/dev/null || echo 'ceph CLI not available or no sudo'")
+server_shell(command="sudo ceph osd tree 2>/dev/null | head -30 || echo 'ceph CLI not available'")
 ```
 
 ## Tools allowed
