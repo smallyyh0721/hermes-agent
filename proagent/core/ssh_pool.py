@@ -142,6 +142,7 @@ class SSHConnection:
         """Establish SSH connection via ControlMaster.
 
         Returns True if connection is established successfully.
+        Retries up to 2 times on timeout (handles transient network issues).
         """
         with self._lock:
             if self.state == ConnectionState.CONNECTED:
@@ -149,35 +150,53 @@ class SSHConnection:
                 if self._check_alive():
                     return True
 
-            self.state = ConnectionState.CONNECTING
-            cmd = self._build_ssh_cmd()
-            cmd.append("echo 'proagent-connected'")
+            max_retries = 3
+            for attempt in range(max_retries):
+                self.state = ConnectionState.CONNECTING
+                cmd = self._build_ssh_cmd()
+                cmd.append("echo 'proagent-connected'")
 
-            try:
-                result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=20
-                )
-                if result.returncode == 0 and "proagent-connected" in result.stdout:
-                    self.state = ConnectionState.CONNECTED
-                    self.last_error = ""
-                    logger.info("SSH connected: %s", self.target.display_name)
-                    return True
-                else:
-                    error = result.stderr.strip() or result.stdout.strip()
+                try:
+                    result = subprocess.run(
+                        cmd, capture_output=True, text=True, timeout=20
+                    )
+                    if result.returncode == 0 and "proagent-connected" in result.stdout:
+                        self.state = ConnectionState.CONNECTED
+                        self.last_error = ""
+                        logger.info("SSH connected: %s", self.target.display_name)
+                        return True
+                    else:
+                        error = result.stderr.strip() or result.stdout.strip()
+                        self.state = ConnectionState.ERROR
+                        self.last_error = error
+                        if attempt < max_retries - 1:
+                            logger.warning(
+                                "SSH attempt %d/%d failed for %s: %s, retrying...",
+                                attempt + 1, max_retries, self.target.display_name, error[:80]
+                            )
+                            time.sleep(1 * (attempt + 1))  # backoff: 1s, 2s
+                            continue
+                        logger.error("SSH connection failed to %s: %s", self.target.display_name, error)
+                        return False
+                except subprocess.TimeoutExpired:
                     self.state = ConnectionState.ERROR
-                    self.last_error = error
-                    logger.error("SSH connection failed to %s: %s", self.target.display_name, error)
+                    self.last_error = f"Connection timed out (attempt {attempt + 1}/{max_retries})"
+                    if attempt < max_retries - 1:
+                        logger.warning(
+                            "SSH timeout attempt %d/%d for %s, retrying...",
+                            attempt + 1, max_retries, self.target.display_name
+                        )
+                        time.sleep(2 * (attempt + 1))  # backoff: 2s, 4s
+                        continue
+                    logger.error("SSH connection timed out: %s (all %d attempts)", self.target.display_name, max_retries)
                     return False
-            except subprocess.TimeoutExpired:
-                self.state = ConnectionState.ERROR
-                self.last_error = "Connection timed out (20s)"
-                logger.error("SSH connection timed out: %s", self.target.display_name)
-                return False
-            except Exception as e:
-                self.state = ConnectionState.ERROR
-                self.last_error = str(e)
-                logger.error("SSH connection error to %s: %s", self.target.display_name, e)
-                return False
+                except Exception as e:
+                    self.state = ConnectionState.ERROR
+                    self.last_error = str(e)
+                    logger.error("SSH connection error to %s: %s", self.target.display_name, e)
+                    return False
+
+            return False
 
     def _check_alive(self) -> bool:
         """Check if the ControlMaster socket is still alive."""
@@ -212,7 +231,7 @@ class SSHConnection:
         Returns:
             Tuple of (return_code, output_text)
         """
-        # Ensure connected
+        # Ensure connected (with retry built into connect())
         if self.state != ConnectionState.CONNECTED:
             if not self.connect():
                 return (-1, f"SSH not connected: {self.last_error}")
@@ -242,9 +261,21 @@ class SSHConnection:
         except subprocess.TimeoutExpired:
             return (-1, f"Command timed out after {timeout}s")
         except Exception as e:
-            # Connection may have dropped
+            # Connection may have dropped — mark as error and retry once
             self.state = ConnectionState.ERROR
             self.last_error = str(e)
+            # One retry attempt
+            if self.connect():
+                try:
+                    cmd2 = self._build_ssh_cmd()
+                    cmd2.extend(["bash", "-c", shlex.quote(command)])
+                    result = subprocess.run(cmd2, capture_output=True, text=True, timeout=timeout)
+                    output = result.stdout
+                    if result.stderr:
+                        output += "\n[stderr]\n" + result.stderr
+                    return (result.returncode, output)
+                except Exception:
+                    pass
             return (-1, f"SSH execution error: {e}")
 
     def disconnect(self) -> None:
