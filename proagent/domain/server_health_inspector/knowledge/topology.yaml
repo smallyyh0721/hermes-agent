@@ -4,7 +4,7 @@
 
 entities:
   nodes:
-    server-01:
+    wj-lab-cpt-04:
       type: compute
       host: 10.11.4.13
       os: Ubuntu 22.04
@@ -17,7 +17,7 @@ entities:
         node_exporter: "http://10.11.4.13:9100/metrics"
         juicefs: "http://localhost:9567/metrics"
 
-    ceph-01:
+    wj-lab-stor-01:
       type: storage
       host: 10.11.4.20
       os: Ubuntu 22.04
@@ -32,7 +32,7 @@ entities:
   storage:
     ceph-cluster:
       type: ceph
-      nodes: [ceph-01]
+      nodes: [wj-lab-stor-01]
       # Add more ceph nodes as they are configured
       metrics:
         node_exporter: "http://{node_host}:9100/metrics"
@@ -69,7 +69,7 @@ entities:
 
 relationships:
   # node → storage
-  - from: server-01
+  - from: wj-lab-cpt-04
     to: juicefs
     type: mounts
     detail: "/mnt/jfs200G (jfs200)"
@@ -82,7 +82,7 @@ relationships:
 
   # storage → node (Ceph runs on)
   - from: ceph-cluster
-    to: ceph-01
+    to: wj-lab-stor-01
     type: runs_on
 
   # Add more relationships as you add entities:

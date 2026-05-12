@@ -1,0 +1,20 @@
+id: aigc-creator
+version: 0.1.0
+display_name: AIGC 创作 Agent
+description: AI 内容生成（图片/音频/视频），基于 MiniMax CLI
+
+models:
+  planner:    { provider: minimax-cn, model: MiniMax-M2.7 }
+  executor:   { provider: minimax-cn, model: MiniMax-M2.7 }
+
+gateways:
+  - discord
+  - cli
+
+capabilities:
+  read_only: false
+  suggest: true
+  write_action: true    # AIGC generates files (images/audio) - this is its core function
+
+tools:
+  - aigc_generate       # MiniMax CLI wrapper

@@ -80,6 +80,13 @@ def main():
     gw_parser = subparsers.add_parser("gateway", help="Start gateway mode (Discord)")
     gw_parser.add_argument("--config", "-c", help="Path to proagent.yaml")
 
+    # domain
+    domain_parser = subparsers.add_parser("domain", help="Manage domain packs")
+    domain_sub = domain_parser.add_subparsers(dest="domain_action")
+    domain_sub.add_parser("list", help="List available domain packs")
+    domain_use = domain_sub.add_parser("use", help="Switch active domain")
+    domain_use.add_argument("domain_id", help="Domain pack ID to activate")
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -100,6 +107,8 @@ def main():
         cmd_status(args)
     elif args.command == "gateway":
         cmd_gateway(args)
+    elif args.command == "domain":
+        cmd_domain(args)
     else:
         parser.print_help()
 
@@ -141,12 +150,16 @@ def cmd_run(args):
     # Build the minimal ProAgent
     mc = config.models.executor
     verbose = getattr(args, "verbose", False)
+
+    # Build tools based on active domain
+    tools = _build_tools_for_domain(config.domain, runtime)
+
     try:
         agent = ProAgent(
             provider=mc.provider,
             model=mc.model,
             system_prompt=runtime.build_hermes_system_prompt(),
-            tools=[build_server_shell_tool(runtime)],
+            tools=tools,
             base_url=mc.base_url,
             verbose=verbose,
         )
@@ -164,6 +177,47 @@ def cmd_run(args):
     print()
 
     _run_repl(agent, runtime)
+
+
+def _build_tools_for_domain(domain: str, runtime) -> list:
+    """Build the appropriate tool list based on the active domain."""
+    from proagent.core.agent import ToolDef, build_server_shell_tool
+
+    if domain in ("server-health-inspector", "server_health_inspector"):
+        return [build_server_shell_tool(runtime)]
+    elif domain in ("aigc-creator", "aigc_creator"):
+        from proagent.domain.aigc_creator.tools.aigc_generate import aigc_generate_handler
+        return [ToolDef(
+            name="aigc_generate",
+            description=(
+                "Generate AI content (images, speech, music) using MiniMax CLI. "
+                "Use command='image generate' for images, 'speech synthesize' for voice. "
+                "The prompt describes what to generate. Options are extra CLI flags."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "MiniMax CLI command: 'image generate', 'speech synthesize', 'music generate'",
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": "Content description (for images) or text to speak (for speech)",
+                    },
+                    "options": {
+                        "type": "string",
+                        "description": "Extra CLI flags, e.g. '--aspect-ratio 16:9' or '--voice male-qn-qingse'",
+                        "default": "",
+                    },
+                },
+                "required": ["command", "prompt"],
+            },
+            handler=aigc_generate_handler,
+        )]
+    else:
+        # Unknown domain — fallback to server_shell
+        return [build_server_shell_tool(runtime)]
 
 
 def _run_repl(agent, runtime):
@@ -531,6 +585,65 @@ def cmd_status(args):
     for t in config.targets:
         print(f"    - {t.display_name}")
     print(f"📡 Gateways: {', '.join(k for k, v in config.gateways.items() if v.enabled) or 'none'}")
+
+
+def cmd_domain(args):
+    """Manage domain packs."""
+    from proagent.core.config import load_config, save_config, find_config_file
+    from pathlib import Path as _P
+
+    action = getattr(args, "domain_action", None)
+
+    # Discover available domain packs
+    domain_base = _P(__file__).resolve().parents[1] / "domain"
+    available = []
+    for d in sorted(domain_base.iterdir()):
+        pack_file = d / "pack.yaml"
+        if d.is_dir() and pack_file.exists() and d.name != "__pycache__":
+            import yaml
+            with open(pack_file, "r", encoding="utf-8") as f:
+                pack = yaml.safe_load(f) or {}
+            available.append({
+                "id": pack.get("id", d.name),
+                "dir": d.name,
+                "display_name": pack.get("display_name", d.name),
+                "description": pack.get("description", ""),
+            })
+
+    if action == "list" or action is None:
+        config = load_config()
+        print("📦 Available Domain Packs")
+        for p in available:
+            active = " ⭐ (active)" if p["dir"] == config.domain.replace("-", "_") or p["id"] == config.domain else ""
+            print(f"  {p['id']}: {p['display_name']}{active}")
+            if p["description"]:
+                print(f"      {p['description']}")
+        print()
+        print(f"  Switch with: python proagent_run.py domain use <pack-id>")
+
+    elif action == "use":
+        domain_id = args.domain_id
+        # Find matching pack
+        match = None
+        for p in available:
+            if p["id"] == domain_id or p["dir"] == domain_id.replace("-", "_"):
+                match = p
+                break
+
+        if not match:
+            print(f"❌ Domain pack '{domain_id}' not found.")
+            print(f"   Available: {', '.join(p['id'] for p in available)}")
+            return
+
+        # Update config
+        config_path = find_config_file()
+        if not config_path:
+            config_path = _P.cwd() / "proagent.yaml"
+        config = load_config(config_path)
+        config.domain = match["id"]
+        save_config(config, config_path)
+        print(f"✅ Switched to domain: {match['display_name']}")
+        print(f"   Run 'python proagent_run.py run' to start with the new domain")
 
 
 def cmd_gateway(args):

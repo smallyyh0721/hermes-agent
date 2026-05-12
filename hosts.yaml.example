@@ -9,11 +9,11 @@ defaults:
   backend: ssh
 
 hosts:
-  - id: server-01
+  - id: wj-lab-cpt-04
     host: 10.11.4.13
     roles: [compute, juicefs-client]
 
-  - id: ceph-01
+  - id: wj-lab-stor-01
     host: 10.11.4.20
     roles: [ceph-osd, ceph-mon, storage]
 

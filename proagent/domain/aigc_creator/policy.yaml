@@ -1,0 +1,39 @@
+# AIGC Creator - Policy Guard Configuration
+# Only allows MiniMax CLI operations. Blocks all system/server commands.
+
+default: deny
+
+allow_auto:
+  - aigc_generate
+
+forbidden:
+  - server_shell
+  - "*.ssh_*"
+  - "*.kubectl*"
+
+sandbox:
+  shell:
+    mode: denylist
+    # AIGC pack doesn't execute shell commands on remote servers.
+    # The only "execution" is the local mmx CLI.
+    denylist_patterns:
+      - ".*"    # Block ALL shell commands - AIGC only uses aigc_generate tool
+
+  timeout_sec: 120    # Image generation can take up to 2 minutes
+  max_output_kb: 512
+
+# Content safety
+content_guardrails:
+  forbidden_prompts:
+    - "nude"
+    - "naked"
+    - "porn"
+    - "violence"
+    - "gore"
+    - "weapon"
+    - "drug"
+    - "terrorist"
+
+audit:
+  sinks: [sqlite]
+  fields: [ts, session_id, actor, tool, args_hash, decision, latency, result_hash]
