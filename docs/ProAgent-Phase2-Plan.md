@@ -506,3 +506,18 @@ hermes-agent/
 ---
 
 **文档状态**: Draft v0.2 · 基于 Phase 1 实际运行经验制定
+
+---
+
+## Phase 3 进展记录（2026-05-12）
+
+| 里程碑 | 状态 |
+|--------|------|
+| MiniMax CLI 安装 | ✅ `pip install minimax-cli` (mmx 命令) |
+| AIGC Domain Pack | ✅ `proagent/domain/aigc_creator/` |
+| Domain Switch CLI | ✅ `proagent domain list` / `proagent domain use <id>` |
+| 图片生成验证 | ✅ 熊猫动漫风格图片生成成功 |
+| Domain 隔离 | ✅ SRE 模式无 AIGC 工具，AIGC 模式无 SSH 工具 |
+| Phase 3 Requirements Spec | ✅ `.kiro/specs/phase3-security-domain-packs/requirements.md` |
+
+待实现：LLM 审计 (R1)、安全护栏 (R2)、回滚接口 (R3)、执行后端抽象 (R6)
