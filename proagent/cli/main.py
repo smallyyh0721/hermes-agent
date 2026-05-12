@@ -151,8 +151,8 @@ def cmd_run(args):
     mc = config.models.executor
     verbose = getattr(args, "verbose", False)
 
-    # Build tools based on active domain
-    tools = _build_tools_for_domain(config.domain, runtime)
+    # Build tools from domain pack (auto-discovered, no hardcoding)
+    tools = runtime.get_tools()
 
     try:
         agent = ProAgent(
@@ -177,47 +177,6 @@ def cmd_run(args):
     print()
 
     _run_repl(agent, runtime)
-
-
-def _build_tools_for_domain(domain: str, runtime) -> list:
-    """Build the appropriate tool list based on the active domain."""
-    from proagent.core.agent import ToolDef, build_server_shell_tool
-
-    if domain in ("server-health-inspector", "server_health_inspector"):
-        return [build_server_shell_tool(runtime)]
-    elif domain in ("aigc-creator", "aigc_creator"):
-        from proagent.domain.aigc_creator.tools.aigc_generate import aigc_generate_handler
-        return [ToolDef(
-            name="aigc_generate",
-            description=(
-                "Generate AI content (images, speech, music) using MiniMax CLI. "
-                "Use command='image generate' for images, 'speech synthesize' for voice. "
-                "The prompt describes what to generate. Options are extra CLI flags."
-            ),
-            parameters={
-                "type": "object",
-                "properties": {
-                    "command": {
-                        "type": "string",
-                        "description": "MiniMax CLI command: 'image generate', 'speech synthesize', 'music generate'",
-                    },
-                    "prompt": {
-                        "type": "string",
-                        "description": "Content description (for images) or text to speak (for speech)",
-                    },
-                    "options": {
-                        "type": "string",
-                        "description": "Extra CLI flags, e.g. '--aspect-ratio 16:9' or '--voice male-qn-qingse'",
-                        "default": "",
-                    },
-                },
-                "required": ["command", "prompt"],
-            },
-            handler=aigc_generate_handler,
-        )]
-    else:
-        # Unknown domain — fallback to server_shell
-        return [build_server_shell_tool(runtime)]
 
 
 def _run_repl(agent, runtime):
@@ -590,31 +549,19 @@ def cmd_status(args):
 def cmd_domain(args):
     """Manage domain packs."""
     from proagent.core.config import load_config, save_config, find_config_file
+    from proagent.domain.base import discover_packs
     from pathlib import Path as _P
 
     action = getattr(args, "domain_action", None)
 
     # Discover available domain packs
-    domain_base = _P(__file__).resolve().parents[1] / "domain"
-    available = []
-    for d in sorted(domain_base.iterdir()):
-        pack_file = d / "pack.yaml"
-        if d.is_dir() and pack_file.exists() and d.name != "__pycache__":
-            import yaml
-            with open(pack_file, "r", encoding="utf-8") as f:
-                pack = yaml.safe_load(f) or {}
-            available.append({
-                "id": pack.get("id", d.name),
-                "dir": d.name,
-                "display_name": pack.get("display_name", d.name),
-                "description": pack.get("description", ""),
-            })
+    available = discover_packs()
 
     if action == "list" or action is None:
         config = load_config()
         print("📦 Available Domain Packs")
         for p in available:
-            active = " ⭐ (active)" if p["dir"] == config.domain.replace("-", "_") or p["id"] == config.domain else ""
+            active = " ⭐ (active)" if p["id"] == config.domain else ""
             print(f"  {p['id']}: {p['display_name']}{active}")
             if p["description"]:
                 print(f"      {p['description']}")
@@ -626,7 +573,7 @@ def cmd_domain(args):
         # Find matching pack
         match = None
         for p in available:
-            if p["id"] == domain_id or p["dir"] == domain_id.replace("-", "_"):
+            if p["id"] == domain_id or p["dir_name"] == domain_id.replace("-", "_"):
                 match = p
                 break
 

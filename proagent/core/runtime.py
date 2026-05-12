@@ -64,7 +64,7 @@ class ProAgentRuntime:
         self.knowledge_index = self._load_knowledge_index()
 
         # Initialize SSH pool
-        self.ssh_pool = SSHPool(config.targets)
+        self.ssh_pool = SSHPool(config.targets if self.should_init_ssh() else [])
 
         # Tool registry for ProAgent-specific tools
         self._tools: Dict[str, Dict[str, Any]] = {}
@@ -75,9 +75,31 @@ class ProAgentRuntime:
             len(config.targets),
         )
 
+    def should_init_ssh(self) -> bool:
+        """Check if the current domain requires SSH connections."""
+        pack = getattr(self, "_domain_pack", None)
+        if pack:
+            return pack.requires_ssh
+        return True  # Default: assume SSH needed
+
+    def get_tools(self) -> list:
+        """Get tools from the active domain pack (no hardcoding)."""
+        pack = getattr(self, "_domain_pack", None)
+        if pack:
+            return pack.get_tools(self)
+        # Fallback for backward compat
+        from proagent.core.agent import build_server_shell_tool
+        return [build_server_shell_tool(self)]
+
     def _resolve_domain_dir(self) -> Path:
         """Find the domain pack directory."""
-        # Check relative to project root
+        from proagent.domain.base import load_pack
+        pack = load_pack(self.config.domain)
+        if pack:
+            self._domain_pack = pack
+            return pack.pack_dir
+
+        # Fallback: check relative to project root
         candidates = [
             Path.cwd() / "proagent" / "domain" / self.config.domain.replace("-", "_"),
             Path(__file__).resolve().parents[1] / "domain" / self.config.domain.replace("-", "_"),
@@ -87,7 +109,7 @@ class ProAgentRuntime:
                 return candidate
 
         logger.warning("Domain pack directory not found for '%s'", self.config.domain)
-        return candidates[0]  # Return expected path even if not found
+        return candidates[0]
 
     def _load_policy(self) -> PolicyGuard:
         """Load policy configuration from domain pack."""
