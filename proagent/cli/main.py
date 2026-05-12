@@ -62,7 +62,10 @@ def main():
     target_add.add_argument("--keyfile", help="SSH key file path")
     target_test = target_sub.add_parser("test", help="Test target connectivity")
     target_test.add_argument("target_id", nargs="?", help="Target ID to test (all if omitted)")
+    target_test.add_argument("--all", action="store_true", help="Test all targets")
     target_sub.add_parser("remove", help="Remove a target").add_argument("target_id")
+    target_import = target_sub.add_parser("import", help="Import targets from hosts.yaml")
+    target_import.add_argument("hosts_file", help="Path to hosts.yaml")
 
     # inspect
     inspect_parser = subparsers.add_parser("inspect", help="Run one-shot inspection")
@@ -442,6 +445,20 @@ def cmd_target(args):
     elif action == "remove":
         print(f"  Removing target: {args.target_id}")
         print("  ✅ Removed (restart proagent to apply)")
+
+    elif action == "import":
+        from proagent.core.target_import import import_hosts
+        hosts_path = Path(args.hosts_file)
+        if not hosts_path.exists():
+            print(f"  ❌ File not found: {hosts_path}")
+            return
+        try:
+            added, updated = import_hosts(hosts_path)
+            print(f"  ✅ Imported: {added} added, {updated} updated")
+            print(f"     Run 'python proagent_run.py target list' to verify")
+            print(f"     Run 'python proagent_run.py target test --all' to test connectivity")
+        except Exception as e:
+            print(f"  ❌ Import failed: {e}")
 
 
 def cmd_inspect(args):

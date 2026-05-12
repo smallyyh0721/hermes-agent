@@ -378,9 +378,10 @@ hermes-agent/
 │   │   ├── providers.py            # LLM Provider 注册表（minimax-cn/openai/anthropic）
 │   │   ├── runtime.py              # 编排器：Config + SSH + Policy + Domain → Agent
 │   │   ├── ssh_pool.py             # SSH 连接池（ControlMaster/Windows 兼容/重连）
-│   │   ├── alert_router.py         # [Phase 2] 告警路由（预留，暂不实现）
-│   │   ├── metrics_fetcher.py      # [Phase 2] Prometheus metrics 抓取与解析
-│   │   └── target_import.py        # [Phase 2] 批量导入 hosts.yaml / 网段扫描
+│   │   ├── ontology.py              # ✅ Topology loader (topology.yaml → system prompt)
+│   │   ├── alert_router.py         # [待实现] 告警路由
+│   │   ├── metrics_fetcher.py      # [待实现] Prometheus metrics 抓取与解析
+│   │   └── target_import.py        # ✅ 批量导入 hosts.yaml (range expansion)
 │   │
 │   ├── policy/                     # ── 安全与审计 ──
 │   │   ├── guard.py                # Policy Guard：denylist 正则匹配 + 决策
@@ -441,22 +442,22 @@ hermes-agent/
 
 ## 4. Phase 2 里程碑
 
-| # | 里程碑 | 交付物 | 预估工期 |
-|---|--------|--------|---------|
-| M2.1 | 多主机批量导入 | `target import hosts.yaml` + range 语法 + `--all` 测试 | 2 天 |
-| M2.2 | Target Group | 按 role/tag 筛选 + 并行执行 | 2 天 |
-| M2.3 | 连接池优化 | 并行连接 + 健康检查 + 自动重连 | 2 天 |
-| M2.4 | Ceph Metrics 巡检 | curl 9283/9100 → 解析 → 阈值判定 → 报告 | 3 天 |
-| M2.5 | JuiceFS Metrics 巡检 | curl 9567 → 解析 → 阈值判定 → 报告 | 2 天 |
-| M2.6 | 存储异常 Discord 汇报 | 发现问题 → 推送 → 询问是否深入 → 深度诊断 | 3 天 |
-| M2.7 | Skill 模式检测 | 识别重复命令序列 | 3 天 |
-| M2.8 | Skill 草稿生成 | 命令序列 → SKILL.md 模板 | 2 天 |
-| M2.9 | Skill 人工审核流 | Discord/Feishu 按钮 approve/reject | 2 天 |
-| M2.10 | 定时巡检推送 | Cron → 巡检(主机+存储) → Discord/Feishu 推送 | 2 天 |
-| M2.11 | Session 持久化 | 对话历史跨重启保留 | 1 天 |
-| M2.12 | 文档更新 | 部署指南 + 存储监控指南 + Skill 开发指南 | 2 天 |
-
-**总预估**: ~24 天（可并行，实际 2-3 周）
+| # | 里程碑 | 交付物 | 状态 |
+|---|--------|--------|------|
+| M2.1 | 多主机批量导入 | `target import hosts.yaml` + range 语法 | ✅ 完成 |
+| M2.2 | Kubeconfig 接入 | kubectl read 允许 / write 拦截 + kubeconfig 占位 | ✅ 完成 |
+| M2.3 | Ontology Framework | topology.yaml + ontology.py 加载器 + 注入 system prompt | ✅ 完成 |
+| M2.4 | Target Group | 按 role/tag 筛选 + 并行执行 | 待实现 |
+| M2.5 | 连接池优化 | 并行连接 + 健康检查 + 自动重连 | 待实现 |
+| M2.6 | Ceph Metrics 巡检 | curl 9100 → 解析 → 阈值判定 → 报告 | 待实现 |
+| M2.7 | JuiceFS Metrics 巡检 | curl 9567 → 解析 → 阈值判定 → 报告 | 待实现 |
+| M2.8 | 存储异常 Discord 汇报 | 发现问题 → 推送 → 询问是否深入 → 深度诊断 | 待实现 |
+| M2.9 | Skill 模式检测 | 识别重复命令序列 | 待实现 |
+| M2.10 | Skill 草稿生成 | 命令序列 → SKILL.md 模板 | 待实现 |
+| M2.11 | Skill 人工审核流 | Discord/Feishu 按钮 approve/reject | 待实现 |
+| M2.12 | 定时巡检推送 | Cron → 巡检(主机+存储) → Discord/Feishu 推送 | 待实现 |
+| M2.13 | Session 持久化 | 对话历史跨重启保留 | 待实现 |
+| M2.14 | 文档更新 | 部署指南 + 存储监控指南 + Skill 开发指南 | 进行中 |
 
 ---
 

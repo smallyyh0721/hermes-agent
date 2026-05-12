@@ -195,11 +195,18 @@ Always provide structured, evidence-based analysis."""
 
         Combines:
         - Domain system prompt
+        - Topology (ontology)
         - Knowledge index (condensed)
         - Available targets info
         - Policy summary
         """
         parts = [self.system_prompt]
+
+        # Add topology (ontology)
+        from proagent.core.ontology import load_and_render_topology
+        topology_text = load_and_render_topology(self.domain_dir)
+        if topology_text:
+            parts.append(topology_text)
 
         # Add target info
         targets_info = "\n## Available Targets\n"

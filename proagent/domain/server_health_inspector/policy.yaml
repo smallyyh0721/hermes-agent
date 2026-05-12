@@ -93,6 +93,10 @@ sandbox:
       - "\\bvim\\b"
       - "\\bnano\\b"
       - "\\bemacs\\b"
+      # Kubernetes write operations
+      - "kubectl\\s+(delete|apply|patch|edit|create|replace|scale|rollout|drain|cordon|uncordon|taint|label|annotate)"
+      - "kubectl\\s+.*--force"
+      - "helm\\s+(install|upgrade|uninstall|rollback)"
       # Dangerous patterns
       - ":(){ :|:& };:"
       - "\\$\\(.*\\)\\s*>"

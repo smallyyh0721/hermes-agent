@@ -1,0 +1,96 @@
+# System Topology - Entity & Relationship Model
+# This file describes what exists in the system and how things connect.
+# The Agent loads this at startup to understand infrastructure context.
+
+entities:
+  nodes:
+    server-01:
+      type: compute
+      host: 10.11.4.13
+      os: Ubuntu 22.04
+      roles: [gpu-worker, juicefs-client]
+      hardware:
+        cpu: "64 cores"
+        mem: "256GB"
+        gpu: "8x NVIDIA A100"
+      metrics:
+        node_exporter: "http://10.11.4.13:9100/metrics"
+        juicefs: "http://localhost:9567/metrics"
+
+    ceph-01:
+      type: storage
+      host: 10.11.4.20
+      os: Ubuntu 22.04
+      roles: [ceph-osd, ceph-mon, ceph-mgr]
+      hardware:
+        cpu: "32 cores"
+        mem: "128GB"
+        disks: "NVMe SSDs"
+      metrics:
+        node_exporter: "http://10.11.4.20:9100/metrics"
+
+  storage:
+    ceph-cluster:
+      type: ceph
+      nodes: [ceph-01]
+      # Add more ceph nodes as they are configured
+      metrics:
+        node_exporter: "http://{node_host}:9100/metrics"
+      notes: "Ceph exporter (9283) not deployed; use node_exporter + ceph CLI"
+
+    juicefs:
+      type: juicefs
+      name: jfs200
+      version: "1.3.1"
+      backend_storage: ceph-cluster
+      mountpoint: /mnt/jfs200G
+      clients: [server-01]
+      metrics: "http://localhost:9567/metrics"
+      notes: "200GB volume, backed by Ceph RBD"
+
+  # Kubernetes (fill in when kubeconfig is ready)
+  # kubernetes:
+  #   cluster-01:
+  #     type: k8s
+  #     api_server: https://10.11.4.x:6443
+  #     master_nodes: [k8s-master-01]
+  #     worker_nodes: [server-01, gpu-01]
+  #     namespaces: [default, training, monitoring]
+
+  services:
+    # Add your services here
+    # training-platform:
+    #   type: application
+    #   runs_on: [server-01]
+    #   depends_on: [juicefs, ceph-cluster]
+    #   ports: [8080]
+    #   notes: "ML training jobs read datasets from JuiceFS"
+    placeholder: {}
+
+relationships:
+  # node → storage
+  - from: server-01
+    to: juicefs
+    type: mounts
+    detail: "/mnt/jfs200G (jfs200)"
+
+  # storage → storage (JuiceFS backed by Ceph)
+  - from: juicefs
+    to: ceph-cluster
+    type: stores_on
+    detail: "Object storage backend"
+
+  # storage → node (Ceph runs on)
+  - from: ceph-cluster
+    to: ceph-01
+    type: runs_on
+
+  # Add more relationships as you add entities:
+  # - from: training-platform
+  #   to: juicefs
+  #   type: reads_from
+  #   detail: "datasets and checkpoints"
+  #
+  # - from: training-platform
+  #   to: server-01
+  #   type: runs_on

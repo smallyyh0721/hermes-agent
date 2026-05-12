@@ -1,0 +1,23 @@
+# ProAgent Hosts Configuration
+# Import with: python proagent_run.py target import hosts.yaml
+#
+# Supports range syntax: {01..04} expands to 01, 02, 03, 04
+
+defaults:
+  user: yuyonghao
+  port: 22
+  backend: ssh
+
+hosts:
+  - id: server-01
+    host: 10.11.4.13
+    roles: [compute, juicefs-client]
+
+  - id: ceph-01
+    host: 10.11.4.20
+    roles: [ceph-osd, ceph-mon, storage]
+
+  # Range example (uncomment to use):
+  # - id: gpu-{01..04}
+  #   host: 10.11.5.{1..4}
+  #   roles: [gpu-worker, juicefs-client]
