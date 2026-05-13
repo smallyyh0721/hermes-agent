@@ -46,14 +46,17 @@
 - 关键前缀: `juicefs_object_request_`, `juicefs_blockcache_`, `juicefs_transaction_`, `juicefs_used_`
 
 ### JuiceFS CLI 命令（在 wj-lab-cpt-04 上执行）
-- **卷状态**: `juicefs status jfs200` — 查看连接数、session 信息
+- **卷状态**: `juicefs status "redis://:qinhuai@mymaster,10.11.4.20,10.11.4.21,10.11.4.22:26379/0"` — 查看连接数、session
 - **实时统计**: `juicefs stats /mnt/jfs200G` — FUSE ops/s、延迟、吞吐
 - **空间统计**: `juicefs summary /mnt/jfs200G --depth 1` — 目录级空间占用
 - **文件信息**: `juicefs info /mnt/jfs200G/<path>` — chunk 分布、元数据
 - **访问分析**: `juicefs profile /mnt/jfs200G --interval 5` — 热点文件、访问模式
 - **诊断收集**: `juicefs debug /mnt/jfs200G` — 完整诊断信息
-- **卷配置**: `juicefs config redis://10.11.4.20:6379/1` — 查看配置（只读）
-- **注意**: JuiceFS 挂载在 wj-lab-cpt-04 的 /mnt/jfs200G，所有 juicefs 命令在该节点执行
+- **卷配置**: `juicefs config "redis://:qinhuai@mymaster,10.11.4.20,10.11.4.21,10.11.4.22:26379/0"` — 查看配置
+- **重要**: 
+  - JuiceFS 挂载在 wj-lab-cpt-04 的 /mnt/jfs200G
+  - 元数据 URL 格式: `"redis://:qinhuai@mymaster,10.11.4.20,10.11.4.21,10.11.4.22:26379/0"`（Redis Sentinel 模式，必须带引号）
+  - 不要编造命令参数，如果不确定格式，先用 `juicefs --help` 或 `juicefs <subcmd> --help` 查看
 
 ### Kubernetes 访问
 - **kubectl 在 k8s-master (10.11.4.2) 上执行**

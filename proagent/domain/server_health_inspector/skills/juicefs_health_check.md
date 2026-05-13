@@ -14,7 +14,7 @@
 
 ### Phase 1: 卷状态与连接
 ```
-server_shell(command="juicefs status jfs200 2>/dev/null || echo 'juicefs CLI not available'", target="wj-lab-cpt-04")
+server_shell(command="juicefs status \"redis://:qinhuai@mymaster,10.11.4.20,10.11.4.21,10.11.4.22:26379/0\" 2>/dev/null || echo 'juicefs CLI not available'", target="wj-lab-cpt-04")
 ```
 
 ### Phase 2: 实时性能统计
@@ -61,8 +61,8 @@ server_shell(command="juicefs profile /mnt/jfs200G --interval 5 --count 1 2>/dev
 # 收集完整诊断信息
 server_shell(command="juicefs debug /mnt/jfs200G 2>/dev/null | head -50", target="wj-lab-cpt-04")
 
-# 查看卷配置
-server_shell(command="juicefs config redis://10.11.4.20:6379/1 2>/dev/null | head -20", target="wj-lab-cpt-04")
+# 查看卷配置（使用正确的 Redis Sentinel URL）
+server_shell(command="juicefs config \"redis://:qinhuai@mymaster,10.11.4.20,10.11.4.21,10.11.4.22:26379/0\" 2>/dev/null | head -20", target="wj-lab-cpt-04")
 ```
 
 ## Tools allowed
