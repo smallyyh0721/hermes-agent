@@ -1,0 +1,67 @@
+# Test Agent - Policy Guard Configuration
+# Allows: reading code, writing tests/, executing test commands
+# Denies: modifying source code, destructive operations
+
+default: deny
+
+allow_auto:
+  - code_read
+  - test_execute
+  - coverage_read
+  - report_generate
+
+forbidden:
+  - server_shell    # No SSH to production servers
+  - aigc_generate   # No content generation
+
+sandbox:
+  shell:
+    mode: denylist
+    denylist_patterns:
+      # Protect source code from modification
+      - "git\\s+(push|commit|reset|rebase|merge)"
+      - "rm\\s+"
+      - "mv\\s+src/"
+      - "cp\\s+.*src/"
+      # No production deployments
+      - "kubectl\\s+(apply|delete|patch|scale)"
+      - "helm\\s+(install|upgrade|uninstall)"
+      - "docker\\s+(push|deploy)"
+      # No package installation without approval
+      - "pip\\s+install(?!\\s+-r)"   # allow pip install -r requirements.txt
+      - "npm\\s+install\\s+[^-]"     # allow npm install (no args = from package.json)
+      # No secrets exposure
+      - "cat\\s+.*\\.env"
+      - "echo\\s+.*KEY"
+      - "printenv"
+
+  # Test execution is allowed in these directories
+  allowed_write_paths:
+    - "tests/"
+    - "test/"
+    - "__tests__/"
+    - "spec/"
+    - "*.test.py"
+    - "*.test.ts"
+    - "*.test.js"
+    - "*.spec.ts"
+    - "test_*.py"
+    - "coverage/"
+    - "reports/"
+    - ".coverage"
+    - "coverage.xml"
+    - "junit.xml"
+
+  timeout_sec: 300    # Tests can take up to 5 minutes
+  max_output_kb: 1024
+
+# High-risk test categories requiring human confirmation
+human_confirmation_required:
+  - billing_tests
+  - security_tests
+  - data_deletion_tests
+  - production_acceptance
+
+audit:
+  sinks: [sqlite]
+  fields: [ts, session_id, actor, tool, args_hash, decision, latency, result_hash]

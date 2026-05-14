@@ -1,0 +1,40 @@
+id: test-agent
+version: 0.1.0
+display_name: 智能测试 Agent
+description: AI 代码测试生成、执行、分析与报告。支持单元/功能/API/UI/性能测试，适用于通用软件工程项目。
+
+models:
+  planner:    { provider: minimax-cn, model: MiniMax-M2.7 }
+  executor:   { provider: minimax-cn, model: MiniMax-M2.7 }
+
+gateways:
+  - discord
+  - cli
+
+capabilities:
+  read_only: false
+  suggest: true
+  write_action: true    # Can write test files to tests/ directory
+
+tools:
+  - code_read           # Read source code, PR diff, OpenAPI spec
+  - test_execute        # Execute tests (pytest/jest/go test/playwright)
+  - coverage_read       # Read coverage reports
+  - report_generate     # Generate test reports (markdown/html)
+
+supported_languages:
+  - python
+  - typescript
+  - javascript
+  - go
+  - java
+  - rust
+
+supported_test_types:
+  - unit
+  - functional
+  - api
+  - ui
+  - performance
+  - regression
+  - acceptance
