@@ -53,6 +53,7 @@ class PolicyConfig:
     forbidden_tools: List[str] = field(default_factory=list)
     allow_auto: List[str] = field(default_factory=list)
     require_approval: List[str] = field(default_factory=list)
+    write_action_whitelist: List[str] = field(default_factory=list)  # Phase 4: per-domain whitelist of allowed write tools
 
 
 def load_policy(policy_path: Path) -> PolicyConfig:
@@ -83,6 +84,7 @@ def load_policy(policy_path: Path) -> PolicyConfig:
     config.forbidden_tools = raw.get("forbidden", [])
     config.allow_auto = raw.get("allow_auto", [])
     config.require_approval = raw.get("require_approval", [])
+    config.write_action_whitelist = raw.get("write_action_whitelist", [])
 
     return config
 
@@ -127,8 +129,18 @@ class PolicyGuard:
         Returns:
             Decision.ALLOW, Decision.DENY, or Decision.APPROVAL_REQUIRED
         """
-        # Phase 1: write_action is always denied
+        # write_action: deny by default, but allow if explicitly whitelisted in policy
         if category == ToolCategory.WRITE_ACTION:
+            if tool_name in self.config.write_action_whitelist:
+                logger.info(
+                    "PolicyGuard ALLOW write_action '%s' (whitelisted in domain '%s')",
+                    tool_name, self.domain,
+                )
+                return Decision.ALLOW
+            logger.warning(
+                "PolicyGuard DENY write_action '%s' (not in whitelist for domain '%s')",
+                tool_name, self.domain,
+            )
             return Decision.DENY
 
         # Check forbidden list

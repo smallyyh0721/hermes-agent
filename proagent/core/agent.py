@@ -40,6 +40,7 @@ class ToolDef:
     description: str
     parameters: Dict[str, Any]
     handler: Callable[..., str]
+    category: str = "read_only"  # read_only | suggest | write_action — used by PolicyGuard
 
 
 class ProAgent:
@@ -52,7 +53,7 @@ class ProAgent:
         response = agent.chat("检查 CPU 负载")
     """
 
-    MAX_ITERATIONS = 15   # Max tool-calling rounds per user turn
+    DEFAULT_MAX_ITERATIONS = 15   # Default max tool-calling rounds per user turn
 
     def __init__(
         self,
@@ -64,10 +65,13 @@ class ProAgent:
         base_url: str = "",
         max_tokens: int = 4096,
         verbose: bool = False,
+        max_iterations: int = None,
+        policy_guard=None,
     ):
         from proagent.core.providers import resolve_provider
 
         self.verbose = verbose
+        self.policy_guard = policy_guard  # Optional PolicyGuard instance for tool-call enforcement
 
         # Resolve provider to canonical form + default base URL
         profile = resolve_provider(provider)
@@ -86,6 +90,7 @@ class ProAgent:
         self.system_prompt = system_prompt
         self.tools = tools or []
         self.max_tokens = max_tokens
+        self.max_iterations = max_iterations or self.DEFAULT_MAX_ITERATIONS
         self.messages: List[Message] = []
 
         # Store API credentials
@@ -133,10 +138,10 @@ class ProAgent:
         # Add user message
         self.messages.append(Message(role="user", content=user_input))
 
-        # Iterate up to MAX_ITERATIONS rounds of tool calls
-        for iteration in range(self.MAX_ITERATIONS):
+        # Iterate up to max_iterations rounds of tool calls
+        for iteration in range(self.max_iterations):
             if self.verbose:
-                self._trace(f"[iter {iteration+1}] Calling LLM ({self.provider}/{self.model})...")
+                self._trace(f"[iter {iteration+1}/{self.max_iterations}] Calling LLM ({self.provider}/{self.model})...")
 
             if self.api_mode == "openai":
                 response = self._call_openai()
@@ -172,7 +177,7 @@ class ProAgent:
                     self._trace(f"[done] {iteration+1} iteration(s), returning final answer")
                 return response.content
 
-        return "⚠️ Max tool-calling iterations reached without final answer."
+        return f"⚠️ Max tool-calling iterations ({self.max_iterations}) reached without final answer. Consider increasing max_iterations in pack.yaml for complex workflows."
 
     # ========================================================================
     # Trace / Verbose output
@@ -221,6 +226,27 @@ class ProAgent:
         tool = self._tool_map.get(name)
         if not tool:
             return f"❌ Unknown tool: {name}"
+
+        # Policy enforcement: check tool category against PolicyGuard
+        if self.policy_guard is not None:
+            try:
+                from proagent.policy.guard import Decision, ToolCategory
+                category_str = getattr(tool, "category", "read_only")
+                try:
+                    category = ToolCategory(category_str)
+                except ValueError:
+                    category = ToolCategory.READ_ONLY
+                decision = self.policy_guard.check_tool(name, category, args)
+                if decision == Decision.DENY:
+                    msg = (
+                        f"⛔ PolicyGuard denied tool '{name}' "
+                        f"(category={category_str}). "
+                        f"This tool is not whitelisted for the active domain."
+                    )
+                    logger.warning(msg)
+                    return msg
+            except Exception as e:
+                logger.warning("Policy check failed for %s: %s", name, e)
 
         try:
             logger.info("Tool call: %s(%s)", name, json.dumps(args)[:200])

@@ -6,13 +6,20 @@ default: deny
 
 allow_auto:
   - code_read
+  - code_scan
+  - prd_parse
   - test_execute
   - coverage_read
+  - report_generate
+
+# Phase 4: Test agent can write reports / coverage / test files via report_generate
+write_action_whitelist:
   - report_generate
 
 forbidden:
   - server_shell    # No SSH to production servers
   - aigc_generate   # No content generation
+  - image_generate_batch
 
 sandbox:
   shell:

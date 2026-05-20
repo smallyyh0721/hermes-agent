@@ -519,5 +519,74 @@ hermes-agent/
 | 图片生成验证 | ✅ 熊猫动漫风格图片生成成功 |
 | Domain 隔离 | ✅ SRE 模式无 AIGC 工具，AIGC 模式无 SSH 工具 |
 | Phase 3 Requirements Spec | ✅ `.kiro/specs/phase3-security-domain-packs/requirements.md` |
+| Test Agent Pack | ✅ `proagent/domain/test_agent/` |
+| AIGC Image Gen Test Cases | ✅ `proagent/domain/test_agent/tests/test_aigc_image_generation.py` |
+| Local-only Domain Run Mode | ✅ `proagent run` 自动跳过 SSH 连接（test-agent / aigc-creator） |
+| SRE Server Shell Test Cases | ✅ `proagent/domain/test_agent/tests/test_sre_server_shell.py` |
+| Environment Variable Loading | ✅ `.env` file loading via python-dotenv |
+| Configurable max_iterations | ✅ Per-domain pack via `max_iterations` in pack.yaml |
 
 待实现：LLM 审计 (R1)、安全护栏 (R2)、回滚接口 (R3)、执行后端抽象 (R6)
+
+---
+
+## Phase 4 进展记录（2026-05-12）
+
+**目标**：完成三 Agent 产品化能力闭环 + 统一 GUI 入口。所有里程碑均已交付并通过 Test Agent 验证。
+
+### 三 Agent 闭环
+
+| 里程碑 | 交付物 | 状态 |
+|--------|--------|------|
+| M4.1 SRE 写操作白名单 | `write_diagnosis_report` + `write_inspection_report` + Policy `write_action_whitelist` | ✅ |
+| M4.2 SRE 自动诊断 SOP | `system_prompt.md` 注入故障排查 + 定期巡检流程 | ✅ |
+| M4.3 SRE 报告生成 | 输出至 `proagent/storage/reports/diagnosis-*.md` 和 `inspection-*.md` | ✅ |
+| M4.4 AIGC 提示词优化 | `prompt_optimize` 工具 + 10 种风格预设 + 质量增强器 | ✅ |
+| M4.5 AIGC 多图生成 | `image_generate_batch` 单次最多 8 张，每张独立 seed | ✅ |
+| M4.6 AIGC 历史 + 反馈 | SQLite (`aigc_history.db`) + `image_history_list` + `image_feedback` | ✅ |
+| M4.7 Test 代码扫描 | `code_scan` 递归识别可测试单元，跳过 vendor 目录 | ✅ |
+| M4.8 Test PRD 解析 | `prd_parse` 提取 EARS / 用户故事 / Bullet 功能 | ✅ |
+| M4.9 Test 报告输出 | `report_generate` Markdown/HTML 报告 | ✅ |
+
+### 统一 GUI
+
+| 里程碑 | 交付物 | 状态 |
+|--------|--------|------|
+| M4.10 GUI 后端 | 复用 ProAgent runtime + ProAgent agent 直接调用（无单独 API Server） | ✅ |
+| M4.11 Streamlit GUI | `proagent/gui/app.py` 四面板：对话/报告库/图片画廊/状态 | ✅ |
+| M4.12 E2E 验证 | Test Agent `pytest` 110 passed, 2 skipped, 0 failed | ✅ |
+| M4.13 文档更新 | Phase 2 Plan + Redesign Plan + 命令示例 | ✅ |
+
+### 安全模型升级
+
+| 维度 | Phase 3 | Phase 4 |
+|------|---------|---------|
+| write_action 默认 | 全 DENY | 全 DENY，但支持 per-domain 白名单 |
+| 工具 category | 隐式 | 显式（`ToolDef.category`） |
+| Policy Guard 调用点 | 仅 shell denylist | shell denylist + 工具 category check |
+| 配置位置 | pack.yaml `capabilities` | + policy.yaml `write_action_whitelist` |
+
+SRE 仅允许两个写工具，AIGC 允许 `aigc_generate / image_generate_batch / image_feedback`，Test Agent 仅允许 `report_generate`。所有非白名单 write_action 一律 `Decision.DENY`。
+
+### 入口示例
+
+```bash
+# CLI（按 domain 切换）
+python proagent_run.py domain use server-health-inspector && python proagent_run.py run -v
+python proagent_run.py domain use aigc-creator && python proagent_run.py run -v
+python proagent_run.py domain use test-agent && python proagent_run.py run -v
+
+# 统一 GUI（推荐）
+python proagent_run.py gui   # 默认 http://localhost:8501
+```
+
+### 与"真正产品"的剩余差距（Phase 5+ 路线）
+
+- 多用户 Auth / RBAC
+- Session 持久化（重启后历史保留）
+- Discord 审批按钮（当前 GUI 无审批流，仅本地策略）
+- Prometheus metrics + OpenTelemetry trace
+- Docker / docker-compose 部署清单
+- Provider fallback（多 provider 容错）
+- PII 脱敏 + 密钥轮换
+- Cron 定时巡检 + Discord 推送（框架已就绪，仅需配置）

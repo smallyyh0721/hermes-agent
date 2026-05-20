@@ -20,6 +20,10 @@ from pathlib import Path
 # Ensure project root is in path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# Load .env file (API keys, etc.) — local use only
+from dotenv import load_dotenv
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 from proagent.cli.main import main
 
 if __name__ == "__main__":

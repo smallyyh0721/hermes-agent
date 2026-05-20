@@ -5,6 +5,14 @@ default: deny
 
 allow_auto:
   - aigc_generate
+  - prompt_optimize
+  - image_history_list
+
+# Phase 4: Whitelist for AIGC write_action tools (image generation + feedback)
+write_action_whitelist:
+  - aigc_generate
+  - image_generate_batch
+  - image_feedback
 
 forbidden:
   - server_shell

@@ -38,6 +38,8 @@ class DomainPack:
     knowledge_dir: Path
     skills_dir: Path
     requires_ssh: bool = True
+    max_iterations: int = 15  # Max tool-calling rounds per user turn
+    max_test_steps: int = 50  # Max steps for test execution workflows
     _tools_loader: Optional[Callable] = field(default=None, repr=False)
 
     def get_tools(self, runtime) -> list:
@@ -165,6 +167,8 @@ def load_pack(domain_id: str, domain_base: Path = None) -> Optional[DomainPack]:
         knowledge_dir=pack_dir / "knowledge",
         skills_dir=pack_dir / "skills",
         requires_ssh=requires_ssh,
+        max_iterations=meta.get("max_iterations", 15),
+        max_test_steps=meta.get("max_test_steps", 50),
         _tools_loader=tools_loader,
     )
 

@@ -13,6 +13,12 @@ allow_auto_with_rate_limit:
 require_approval:
   - write_action.*
 
+# Phase 4: ONLY these two write_action tools are allowed for the SRE agent.
+# All other write operations (file deletion, service restart, etc.) remain blocked.
+write_action_whitelist:
+  - write_diagnosis_report
+  - write_inspection_report
+
 forbidden:
   - "*.delete_*"
   - "*.drop_*"

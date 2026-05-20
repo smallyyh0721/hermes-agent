@@ -1,12 +1,11 @@
 id: server-health-inspector
-version: 0.1.0
+version: 0.2.0
 display_name: 服务器健康巡检 Agent
-description: 单机 Linux 服务器健康巡检与问题诊断（只读）
+description: SRE 自动诊断 + 定期巡检（只读 + 两个白名单写操作：诊断报告/巡检报告）
 
 models:
-  planner:    { provider: openai, model: gpt-4.1-mini }
-  executor:   { provider: openai, model: gpt-4.1-mini }
-  summarizer: { provider: anthropic, model: claude-3-5-haiku-latest }
+  planner:    { provider: minimax-cn, model: MiniMax-M2.7 }
+  executor:   { provider: minimax-cn, model: MiniMax-M2.7 }
 
 gateways:
   - discord
@@ -14,7 +13,10 @@ gateways:
   - cron
   - cli
 
+# Phase 4: SRE agent now has limited write capability via whitelist
+max_iterations: 30   # Diagnosis can take many tool calls
+
 capabilities:
   read_only: true
   suggest: true
-  write_action: false
+  write_action: true   # enabled but strictly whitelisted in policy.yaml

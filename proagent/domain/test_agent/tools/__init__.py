@@ -5,6 +5,8 @@ from proagent.domain.test_agent.tools.code_read import code_read_handler
 from proagent.domain.test_agent.tools.test_execute import test_execute_handler
 from proagent.domain.test_agent.tools.coverage_read import coverage_read_handler
 from proagent.domain.test_agent.tools.report_generate import report_generate_handler
+from proagent.domain.test_agent.tools.code_scan import code_scan_handler
+from proagent.domain.test_agent.tools.prd_parse import prd_parse_handler
 
 
 def get_tools(runtime) -> list:
@@ -43,6 +45,65 @@ def get_tools(runtime) -> list:
                 "required": ["path"],
             },
             handler=code_read_handler,
+            category="read_only",
+        ),
+        ToolDef(
+            name="code_scan",
+            description=(
+                "Scan a project directory and produce a testability matrix. "
+                "Returns a list of source files with their language, line count, and "
+                "number of testable units (public functions/classes). "
+                "Sorted by testable_units descending so the agent knows where to focus first. "
+                "Use BEFORE generating tests to understand the project surface."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Project root path to scan (default '.')",
+                        "default": ".",
+                    },
+                    "max_files": {
+                        "type": "integer",
+                        "description": "Cap on number of files to inspect (default 200)",
+                        "default": 200,
+                    },
+                    "include_tests": {
+                        "type": "boolean",
+                        "description": "Include existing test files in the source list",
+                        "default": False,
+                    },
+                },
+                "required": [],
+            },
+            handler=code_scan_handler,
+            category="read_only",
+        ),
+        ToolDef(
+            name="prd_parse",
+            description=(
+                "Parse a PRD/markdown product manual and extract testable requirements: "
+                "section headings, EARS-style acceptance criteria (WHEN/IF/SHALL), user stories, "
+                "and bulleted feature lists. Use to generate tests grounded in product requirements."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to the markdown PRD file",
+                    },
+                    "max_items": {
+                        "type": "integer",
+                        "description": "Cap on extracted items per category (default 50)",
+                        "default": 50,
+                    },
+                },
+                "required": ["path"],
+            },
+            handler=prd_parse_handler,
+            category="read_only",
         ),
         ToolDef(
             name="test_execute",
@@ -73,6 +134,7 @@ def get_tools(runtime) -> list:
                 "required": ["command"],
             },
             handler=test_execute_handler,
+            category="read_only",
         ),
         ToolDef(
             name="coverage_read",
@@ -93,6 +155,7 @@ def get_tools(runtime) -> list:
                 "required": [],
             },
             handler=coverage_read_handler,
+            category="read_only",
         ),
         ToolDef(
             name="report_generate",
@@ -126,5 +189,6 @@ def get_tools(runtime) -> list:
                 "required": ["results"],
             },
             handler=report_generate_handler,
+            category="write_action",
         ),
     ]

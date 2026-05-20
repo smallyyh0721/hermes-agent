@@ -87,6 +87,13 @@ def main():
     domain_use = domain_sub.add_parser("use", help="Switch active domain")
     domain_use.add_argument("domain_id", help="Domain pack ID to activate")
 
+    # gui (Phase 4)
+    gui_parser = subparsers.add_parser("gui", help="Launch the unified Streamlit GUI")
+    gui_parser.add_argument("--port", type=int, default=8501, help="Port to bind (default 8501)")
+    gui_parser.add_argument(
+        "--host", default="localhost", help="Host to bind (default localhost)"
+    )
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -109,6 +116,8 @@ def main():
         cmd_gateway(args)
     elif args.command == "domain":
         cmd_domain(args)
+    elif args.command == "gui":
+        cmd_gui(args)
     else:
         parser.print_help()
 
@@ -126,30 +135,44 @@ def cmd_run(args):
     if hasattr(args, "target") and args.target:
         config.default_target = args.target
 
-    print("🚀 ProAgent Server Health Inspector starting...")
+    # Initialize runtime first so we can show the right domain display name
+    runtime = ProAgentRuntime(config=config)
+
+    pack = getattr(runtime, "_domain_pack", None)
+    display_name = pack.display_name if pack else config.domain
+    needs_ssh = runtime.should_init_ssh()
+
+    print(f"🚀 ProAgent {display_name} starting...")
     print(f"   Domain: {config.domain}")
-    print(f"   Default target: {config.default_target}")
+    if needs_ssh:
+        print(f"   Default target: {config.default_target}")
     print(f"   Model: {config.models.executor.provider}/{config.models.executor.model}")
     print()
 
-    # Initialize runtime
-    runtime = ProAgentRuntime(config=config)
+    # Only connect to targets when the domain actually needs them
+    if needs_ssh:
+        print("📡 Connecting to targets...")
+        results = runtime.connect_targets()
+        for target_id, success in results.items():
+            status = "✅" if success else "❌"
+            print(f"   {status} {target_id}")
+        print()
 
-    # Connect to targets
-    print("📡 Connecting to targets...")
-    results = runtime.connect_targets()
-    for target_id, success in results.items():
-        status = "✅" if success else "❌"
-        print(f"   {status} {target_id}")
-    print()
-
-    if not any(results.values()):
-        print("❌ No targets connected. Run 'proagent target test' to diagnose.")
-        sys.exit(1)
+        if not any(results.values()):
+            print("❌ No targets connected. Run 'proagent target test' to diagnose.")
+            sys.exit(1)
+    else:
+        print(f"   (Domain '{config.domain}' runs locally — no SSH targets needed)")
+        print()
 
     # Build the minimal ProAgent
     mc = config.models.executor
     verbose = getattr(args, "verbose", False)
+
+    # Get max_iterations from domain pack (configurable per domain)
+    max_iterations = 15  # default
+    if pack:
+        max_iterations = getattr(pack, "max_iterations", 15)
 
     # Build tools from domain pack (auto-discovered, no hardcoding)
     tools = runtime.get_tools()
@@ -162,6 +185,8 @@ def cmd_run(args):
             tools=tools,
             base_url=mc.base_url,
             verbose=verbose,
+            max_iterations=max_iterations,
+            policy_guard=runtime.policy,
         )
     except RuntimeError as e:
         print(f"❌ {e}")
@@ -591,6 +616,43 @@ def cmd_domain(args):
         save_config(config, config_path)
         print(f"✅ Switched to domain: {match['display_name']}")
         print(f"   Run 'python proagent_run.py run' to start with the new domain")
+
+
+def cmd_gui(args):
+    """Launch the unified Streamlit GUI (Phase 4)."""
+    import subprocess
+    from pathlib import Path as _P
+
+    gui_app = _P(__file__).resolve().parents[1] / "gui" / "app.py"
+    if not gui_app.exists():
+        print(f"❌ GUI entry not found: {gui_app}")
+        sys.exit(1)
+
+    port = getattr(args, "port", 8501)
+    host = getattr(args, "host", "localhost")
+
+    # Verify streamlit is installed
+    try:
+        import streamlit  # noqa: F401
+    except ImportError:
+        print("❌ Streamlit 未安装。请先执行: pip install streamlit")
+        sys.exit(1)
+
+    print(f"🚀 启动 ProAgent GUI on http://{host}:{port}")
+    print(f"   入口: {gui_app}")
+    print(f"   按 Ctrl+C 停止")
+    print()
+
+    cmd = [
+        sys.executable, "-m", "streamlit", "run", str(gui_app),
+        "--server.port", str(port),
+        "--server.address", host,
+        "--browser.gatherUsageStats", "false",
+    ]
+    try:
+        subprocess.run(cmd, check=False)
+    except KeyboardInterrupt:
+        print("\n👋 GUI stopped.")
 
 
 def cmd_gateway(args):

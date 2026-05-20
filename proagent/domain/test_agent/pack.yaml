@@ -11,6 +11,10 @@ gateways:
   - discord
   - cli
 
+# Test agent needs more iterations for complex test workflows
+max_iterations: 50    # Max tool-calling rounds per user turn (higher for test generation)
+max_test_steps: 100   # Max steps for test execution workflows
+
 capabilities:
   read_only: false
   suggest: true

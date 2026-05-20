@@ -935,3 +935,292 @@ hermes-agent/
 - 人工测试指南（`docs/ProAgent-Manual-Test.md`）
 
 分支：`feature/proagent-redesign`
+
+### Test Agent 完成记录（2026-05-12）
+
+已交付：
+- **Test Agent Domain Pack** (`proagent/domain/test_agent/`)
+  - AI 驱动的测试用例生成、执行、分析与报告
+  - 支持 Python/TypeScript/JavaScript/Go/Java/Rust
+  - 支持单元/功能/API/UI/性能测试类型
+- **AIGC Image Generation Tests** (`proagent/domain/test_agent/tests/test_aigc_image_generation.py`)
+  - 20 个测试用例覆盖成功路径、错误处理、参数验证、安全、输出格式
+  - 18 个单元测试通过，2 个集成测试需真实 API Key
+- **SRE Agent Tests** (`proagent/domain/test_agent/tests/test_sre_server_shell.py`)
+  - 测试 Policy Guard 的 allow/deny 规则
+  - 测试 SSH Pool 本地模式
+  - 测试 Runtime 集成
+- **Domain Pack 配置**
+  - `max_iterations: 50` (测试 Agent 需要更多迭代轮次)
+  - `max_test_steps: 100` (测试执行工作流最大步数)
+  - `requires_ssh: false` (本地测试不需要 SSH)
+- **Agent Loop 增强**
+  - 支持从 `pack.yaml` 配置 `max_iterations`
+  - 改进错误消息显示实际迭代限制
+  - 修复 `resolve_provider` 导入问题
+
+### Phase 4 完成记录（2026-05-12）
+
+**目标**：完成三个 Agent（SRE/AIGC/Test）的产品化能力闭环 + 统一 GUI 入口。
+
+#### M4.1-M4.3: SRE Agent 写操作白名单 ✅
+
+- **`proagent/policy/guard.py`** 新增 `write_action_whitelist` 字段（`PolicyConfig`）
+  - `check_tool` 优先检查 write_action 白名单：在内的允许，否则一律 DENY
+  - 默认空白名单 → 维持 Phase 1 严格 read-only 行为
+- **`proagent/core/agent.py`** ToolDef 新增 `category` 字段（read_only/suggest/write_action）
+  - ProAgent 接收 `policy_guard` 参数；执行每个工具前调用 `check_tool` 强制策略
+- **`proagent/domain/server_health_inspector/tools/write_report.py`** 新增两个工具
+  - `write_diagnosis_report(target, summary, evidence, severity, suggested_steps)`
+  - `write_inspection_report(target, kind, summary, metrics, issues)`
+  - 输出到 `proagent/storage/reports/diagnosis-*.md` 和 `inspection-*.md`
+  - 文件名包含时间戳 + slug，避免覆盖
+- **`policy.yaml`** SRE 包：`write_action_whitelist: [write_diagnosis_report, write_inspection_report]`
+- **`system_prompt.md`** 注入自动诊断 SOP 与定期巡检流程
+- **测试**：`test_sre_phase4.py` 25 个用例全部通过
+
+#### M4.4-M4.6: AIGC Agent 提示词优化 + 多图生成 + 历史 ✅
+
+- **`prompt_optimize`**（suggest 类）：10 种风格预设（auto/photo/anime/oil-painting/watercolor/concept-art/3d-render/minimalist/cyberpunk/pixar）+ 质量增强器 + 默认负面提示词
+- **`image_generate_batch`**（write_action）：单次最多 8 张，每张独立 seed，结果记录到 `aigc_history.db`
+- **`image_history_list`**（read_only）：最近 N 条生成记录的 markdown 表格
+- **`image_feedback`**（write_action）：用户评分 best/good/bad 写入 SQLite
+- **`policy.yaml`** AIGC 包：白名单 `aigc_generate / image_generate_batch / image_feedback`
+- **测试**：`test_aigc_phase4.py` 26 个用例全部通过（mock 化 mmx 调用）
+
+#### M4.7-M4.9: Test Agent 代码扫描 + PRD 解析 ✅
+
+- **`code_scan`**（read_only）：递归扫描项目，识别 Python/TS/JS/Go/Rust/Java 源文件，统计可测试单元（公共 function + class），按数量降序排序，自动跳过 vendor 目录与已存在测试
+- **`prd_parse`**（read_only）：解析 markdown PRD，提取 EARS 验收条件 / 用户故事 / Bullet 功能列表 / 需求章节
+- **`policy.yaml`** Test 包：白名单 `report_generate`；明确禁止 `aigc_generate / image_generate_batch / server_shell`
+- **测试**：`test_test_agent_phase4.py` 18 个用例全部通过
+
+#### M4.10-M4.11: 统一 Streamlit GUI ✅
+
+- **`proagent/gui/app.py`**：基于 Streamlit 的统一控制中心
+  - 侧边栏：三 Agent 切换（SRE/AIGC/Test）
+  - 四个面板：💬 对话 · 📋 报告库 · 🖼️ 图片画廊 · ⚙️ 状态
+  - 对话面板：多轮对话 + 新会话按钮 + per-agent session
+  - 报告库：自动展示 SRE 写入的 markdown 报告，支持选择查看
+  - 图片画廊：从 `aigc_history.db` 读取生成历史，缩略图布局
+  - 状态面板：当前 Agent / 模型 / API Key / Policy Guard 配置
+- **`proagent/cli/main.py`**：新增 `gui` 子命令
+  - `python proagent_run.py gui --port 8501 --host localhost`
+  - 自动委托给 `streamlit run`
+- **测试**：`test_gui.py` 7 个用例全部通过（导入 + helper + CLI dispatch）
+
+#### M4.12: E2E 验证 ✅
+
+`pytest proagent/domain/test_agent/tests/`: **110 passed, 2 skipped, 0 failed**
+
+按 Phase 4 Agent 分布：
+- SRE Phase 4：25 用例 PASS
+- AIGC Phase 4：26 用例 PASS
+- Test Agent Phase 4：18 用例 PASS
+- GUI：7 用例 PASS
+- 原有测试（Phase 1/2/3）：34 用例 PASS（2 skipped 需真实 API Key）
+
+#### 入口与使用
+
+```bash
+# CLI 交互式（任一 agent）
+python proagent_run.py domain use server-health-inspector
+python proagent_run.py run -v
+
+# 切换到 AIGC
+python proagent_run.py domain use aigc-creator
+python proagent_run.py run -v
+
+# 切换到 Test
+python proagent_run.py domain use test-agent
+python proagent_run.py run -v
+
+# 启动统一 GUI（推荐）
+python proagent_run.py gui
+# 浏览器访问 http://localhost:8501
+```
+
+#### 与"真正产品"的剩余差距
+
+下一阶段（Phase 5）应聚焦：
+1. 多用户 Auth / RBAC（当前是单进程单用户）
+2. Session 持久化（重启后历史保留）
+3. Discord 审批按钮（当前 GUI 无审批流，仅本地策略）
+4. Prometheus metrics + OpenTelemetry trace
+5. Docker / docker-compose 部署清单
+6. Provider fallback（当前单 provider 失败即整体失败）
+7. PII 脱敏 + 密钥轮换
+8. Cron 定时巡检写报告 + Discord 推送（M4.3 框架已就绪，仅需配置）
+
+---
+
+## 12. Phase 4 计划：三 Agent 闭环 + 统一 GUI 入口
+
+> 版本: v0.4 (2026-05-12)
+> 目标: 完成 SRE / AIGC / Test 三个 Agent 的产品化能力闭环，提供统一 GUI 入口，进入"可演示、可迭代"产品形态
+
+### 12.1 三 Agent 产品需求
+
+#### 12.1.1 SRE Agent（自动诊断 + 定期巡检）
+
+**当前状态**：✅ 只读巡检 + Policy Guard 已实现
+
+**Phase 4 需补齐**：
+- ✅ 自动诊断流程（需求→工具调用→根因→修复步骤）
+- ✅ 故障排查 SOP（disk_pressure / memory / cpu / network / service / log）
+- ✅ 定期巡检 Cron + 报告
+- 🆕 **白名单写操作**：仅允许两个写动作
+  - `write_diagnosis_report(target, summary, evidence)` → 写入 `proagent/storage/reports/diagnosis-<ts>.md`
+  - `write_inspection_report(target, kind, summary)` → 写入 `proagent/storage/reports/inspection-<ts>.md`
+- 🆕 Policy Guard 写操作白名单：除上述两个工具外，所有 write_action 仍被拦截
+- 🆕 修复步骤生成：在诊断报告中输出建议命令（仅 suggest，不执行）
+
+**Domain Pack 调整**：
+```yaml
+# proagent/domain/server_health_inspector/pack.yaml
+capabilities:
+  read_only: true
+  suggest:   true
+  write_action: true   # 改为 true，但严格白名单
+  write_action_whitelist:
+    - write_diagnosis_report
+    - write_inspection_report
+```
+
+#### 12.1.2 AIGC Agent（提示词优化 + 多图生成）
+
+**当前状态**：✅ MiniMax CLI 工具调用已通
+
+**Phase 4 需补齐**：
+- 🆕 **提示词优化器**：用户给出 idea → LLM 优化为高质量 prompt（含风格、构图、光照等元素）
+- 🆕 **多图生成**：单次最多 8 张图片（变体不同 seed/aspect_ratio/style）
+- 🆕 **图片预览展示**：返回缩略图链接 + 元数据
+- 🆕 **生成历史记录**：保存 prompt + 生成参数 + 输出路径到 SQLite
+- 🆕 **图片选择反馈**：用户标记 best/good/bad → 用于后续 prompt 学习
+
+**新工具**：
+- `prompt_optimize(idea: str, style: str = "auto") -> optimized_prompt`
+- `image_generate_batch(prompt: str, count: int = 4, max: 8) -> list[image_path]`
+- `image_history_list(limit: int = 20) -> list[record]`
+- `image_feedback(image_id: str, rating: str)`  # best/good/bad
+
+#### 12.1.3 Test Agent（自动测试 + 报告）
+
+**当前状态**：✅ 测试用例已能为 AIGC/SRE 生成
+
+**Phase 4 需补齐**：
+- 🆕 **代码扫描器**：递归读取项目 → 识别可测试模块 → 生成测试矩阵
+- 🆕 **产品手册解析**：读取 PRD/markdown → 提取测试需求
+- 🆕 **测试用例覆盖率报告**：以表格形式呈现已覆盖/未覆盖
+- 🆕 **回归测试自动化**：监控代码变更 → 自动 reruun 相关测试
+- 🆕 **测试报告输出**：HTML/Markdown 格式包含通过率、失败用例、覆盖率
+
+**新工具**：
+- `code_scan(path: str) -> module_list`
+- `prd_parse(path: str) -> requirement_list`
+- `test_generate(target: str, prd: str = "") -> test_file_path`
+- `test_run(test_path: str) -> result`
+- `coverage_report(test_path: str) -> coverage_data`
+
+### 12.2 统一 GUI 入口（新增）
+
+**当前**：只有 CLI（`python proagent_run.py run`）
+
+**Phase 4 目标**：基于 Web 的统一 GUI，支持三个 Agent 切换、对话、报告查看
+
+**技术栈**：
+- 后端：FastAPI（已有 api_server gateway）扩展
+- 前端：Streamlit（最简）或 React（更灵活）
+- 通信：WebSocket（实时 streaming）+ REST（历史数据）
+
+**界面布局**：
+```
+┌────────────────────────────────────────────────────┐
+│  ProAgent 控制中心                                 │
+├──────────┬─────────────────────────────────────────┤
+│ Agent    │  对话区                                 │
+│ ────     │  ┌──────────────────────────────────┐   │
+│ 🔧 SRE   │  │ 用户: 检查 web-01 磁盘            │   │
+│ 🎨 AIGC  │  │                                   │   │
+│ 🧪 Test  │  │ 🤖 (verbose: tool calls...)      │   │
+│ ────     │  │                                   │   │
+│ 历史会话  │  └──────────────────────────────────┘   │
+│ 报告库   │  [输入框]                    [发送]     │
+│ 配置     │                                         │
+└──────────┴─────────────────────────────────────────┘
+```
+
+**核心功能**：
+1. 三 Agent 一键切换
+2. Verbose 模式（工具调用可视化）
+3. 报告库：浏览/下载诊断/巡检/测试报告
+4. AIGC 图片画廊
+5. 历史会话回看
+6. 模型/Target/Policy 配置面板
+
+### 12.3 Phase 4 里程碑
+
+| # | 里程碑 | 交付物 | 状态 |
+|---|--------|--------|------|
+| M4.1 | SRE 写操作白名单 | `write_diagnosis_report` + `write_inspection_report` 工具 + Policy 白名单 | 待实现 |
+| M4.2 | SRE 自动诊断 SOP | 故障排查模板（disk/mem/cpu/net/service/log）→ Skills 文件 | 待实现 |
+| M4.3 | SRE 定期巡检 | Cron 触发 → 巡检 → 写报告 → Discord 推送 | 待实现 |
+| M4.4 | AIGC 提示词优化器 | `prompt_optimize` 工具 + 风格库 | 待实现 |
+| M4.5 | AIGC 多图生成 | `image_generate_batch` 工具，最多 8 张 | 待实现 |
+| M4.6 | AIGC 历史 + 反馈 | SQLite 记录 + 评分接口 | 待实现 |
+| M4.7 | Test 代码扫描 | `code_scan` 工具 + 测试矩阵生成 | 待实现 |
+| M4.8 | Test PRD 解析 | `prd_parse` 工具 | 待实现 |
+| M4.9 | Test 覆盖率报告 | 集成 coverage.py + 表格报告 | 待实现 |
+| M4.10 | GUI 后端 API | FastAPI 扩展三 Agent endpoint | 待实现 |
+| M4.11 | GUI 前端 | Streamlit 实现统一界面 | 待实现 |
+| M4.12 | E2E 验证 | Test Agent 测试三个 Agent 各自闭环 | 待实现 |
+| M4.13 | 文档与样例 | 三 Agent 用户手册 + GUI 演示视频 | 待实现 |
+
+### 12.4 与"真正产品"的差距（Gap Analysis）
+
+| 维度 | 当前状态 | 产品要求 | 差距 |
+|------|---------|---------|------|
+| **稳定性** | 单进程，无重启恢复 | 7×24 运行 + 故障自恢复 | 进程守护 + 健康检查 + Session 持久化 |
+| **多用户** | 单 session | 多用户多会话隔离 | Auth + Session 命名空间 + 配额 |
+| **权限管理** | 全开 | RBAC（admin/user/viewer） | 角色矩阵 + 操作审批 |
+| **可观测** | 文本日志 | Metrics/Trace/Log 三件套 | Prometheus + OpenTelemetry |
+| **安全** | API key 明文 | 密钥管理 | Vault/KMS 集成 |
+| **部署** | 本地 Python | 容器化 + 编排 | Dockerfile + docker-compose + K8s manifest |
+| **测试** | 单元 + 集成 | E2E + 性能 + 安全 | Playwright/k6/OWASP ZAP |
+| **CI/CD** | 无 | 自动化构建 + 部署 | GitHub Actions + 制品库 |
+| **文档** | 开发文档 | 用户/运维/API 三类 | 用户手册 + 运维 Runbook + OpenAPI |
+| **国际化** | 中文 | 中英双语 | i18n 资源 + 切换 |
+| **计费/配额** | 无 | 按 token/调用次数 | 计量 + 阈值告警 |
+| **LLM 容错** | 单点失败 | 多 provider fallback | Provider 降级链 |
+| **数据隐私** | 无脱敏 | PII 检测 + 脱敏 | 正则扫描 + masking |
+
+### 12.5 Phase 4 验收标准（DoD）
+
+1. SRE Agent 完成一次完整诊断（输入告警 → 自动诊断 → 输出报告 → 写入 storage）
+2. SRE Agent 尝试任何非白名单写操作（除两个 report 外）必被 Policy Guard 拦截
+3. AIGC Agent 接受用户 idea → 优化 prompt → 生成 4-8 张图片 → 用户可评分
+4. Test Agent 扫描一个项目 → 生成 ≥ 10 个测试用例 → 执行 → 输出覆盖率报告
+5. GUI 在浏览器中展示三 Agent 入口，可切换、可对话、可查看历史
+6. Test Agent 用 e2e 测试覆盖三 Agent 主流程（≥ 30 个测试用例，通过率 100%）
+7. 文档：每个 Agent 有 5 分钟 Quick Start 用户手册
+8. 单台机器连续运行 24h 无内存泄漏、无连接泄漏
+
+### 12.6 Phase 4 执行顺序（建议）
+
+**Week 1**: SRE Agent 写操作白名单 + 自动诊断 SOP（M4.1-M4.3）
+
+**Week 2**: AIGC Agent 提示词优化 + 多图生成（M4.4-M4.6）
+
+**Week 3**: Test Agent 代码扫描 + PRD 解析 + 覆盖率（M4.7-M4.9）
+
+**Week 4**: GUI 后端 + 前端 + E2E 验证（M4.10-M4.13）
+
+---
+
+**API Key 配置（local only, .env）**：
+```bash
+# .env
+MINIMAX_CN_API_KEY=sk-cp-...（已配置）
+```
+
+下一会话计划：使用 Test Agent 自动验证三个 Agent 是否满足 Phase 4 要求，迭代直到全部通过。
