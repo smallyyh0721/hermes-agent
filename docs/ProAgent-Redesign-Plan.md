@@ -22,6 +22,8 @@
 9. [验收标准（DoD）](#9-验收标准dod)
 10. [风险与缓解](#10-风险与缓解)
 11. [附录](#11-附录)
+12. [Phase 4 计划：三 Agent 闭环 + 统一 GUI 入口](#12-phase-4-计划三-agent-闭环--统一-gui-入口)
+13. [Phase 5 计划：四 Agent 产品化 + 7x24 Discord Gateway](#13-phase-5-计划四-agent-产品化--7x24-discord-gateway)
 
 ---
 
@@ -1112,7 +1114,7 @@ capabilities:
 - 🆕 **代码扫描器**：递归读取项目 → 识别可测试模块 → 生成测试矩阵
 - 🆕 **产品手册解析**：读取 PRD/markdown → 提取测试需求
 - 🆕 **测试用例覆盖率报告**：以表格形式呈现已覆盖/未覆盖
-- 🆕 **回归测试自动化**：监控代码变更 → 自动 reruun 相关测试
+- 🆕 **回归测试自动化**：监控代码变更 → 自动 rerun 相关测试
 - 🆕 **测试报告输出**：HTML/Markdown 格式包含通过率、失败用例、覆盖率
 
 **新工具**：
@@ -1224,3 +1226,201 @@ MINIMAX_CN_API_KEY=sk-cp-...（已配置）
 ```
 
 下一会话计划：使用 Test Agent 自动验证三个 Agent 是否满足 Phase 4 要求，迭代直到全部通过。
+
+---
+
+## 13. Phase 5 计划：四 Agent 产品化 + 7x24 Discord Gateway
+
+> 版本: v0.5 (2026-05-20)
+> 目标: 在现有 SRE / Test / AIGC 三 Agent 基础上新增 **Develop Agent**，形成"需求/PRD → 开发 → 测试 → 运维反馈"闭环；同时把 Discord 与 Web UI 升级为 7x24 可用入口与可观测控制台。
+
+### 13.1 Agent 关系与职责边界
+
+| Agent | 职责 | 主要入口 | 是否需要 Web UI | 权限边界 |
+| --- | --- | --- | --- | --- |
+| SRE Agent | Lab SRE：Storage / GPU server / K8S 的巡检、状态检查、故障排查、报告生成 | Discord `/sre`、Web UI、Cron | 是 | 默认 read_only + 报告写入白名单；未来 write_action 必须审批 |
+| Test Agent | 按 PRD/需求验证 SRE Agent、AIGC Agent、Develop Agent 的行为；运行真实测试、单元测试、回归测试并出测试报告 | Discord `/test`、Web UI、CI/local test runner | 是 | 只能读项目、生成测试/报告、执行明确测试命令；不能改业务代码 |
+| AIGC Agent | 娱乐与创作：图片/内容生成，不参与 SRE 产品闭环 | Discord `/aigc` | 否，独立轻量入口即可 | 仅允许 AIGC 相关工具与历史反馈；与 SRE/Test/Develop 隔离 |
+| Develop Agent | Feature / bugfix driven：开发 SRE Agent 自身能力、修复缺陷、更新代码与文档 | Discord `/develop`、Web UI、CLI | 是 | 可改代码，但必须由需求/PRD/issue 驱动；关键变更经 Test Agent 验证 |
+
+命名约定：统一落地为 **Develop Agent**，Discord slash 使用 `/develop`。
+
+### 13.2 目标工作流
+
+```
+需求 / PRD / SRE 事故复盘
+        │
+        ▼
+Develop Agent 设计与实现 feature/bugfix
+        │
+        ▼
+Test Agent 基于需求运行真实测试 / 单元测试 / 回归测试
+        │
+        ▼
+SRE Agent 在 lab 环境巡检 / 排障 / 记录历史
+        │
+        └── 发现缺陷或新需求 → 回到 Develop Agent
+```
+
+要求：
+- 所有 feature 级代码变更必须能追溯到 PRD、requirement、bug report 或 phase milestone。
+- Develop Agent 不能直接把"想到的优化"当作需求；必须先更新 `docs/ProAgent-Redesign-Plan.md` 或当前 phase doc。
+- Test Agent 对每个 feature/bugfix 产出测试结论：测试命令、通过/失败状态、失败证据、未覆盖风险。
+- SRE Agent 的 troubleshooting / check status session 必须进入历史库，供 Web UI 回看、搜索和复盘。
+
+### 13.3 Web UI 要求
+
+SRE Agent、Test Agent、Develop Agent 需要统一 Web UI；AIGC Agent 不纳入主控制台，只在 Discord 使用。
+
+核心页面：
+- **Session History**：按 agent / target / status / date 查询历史会话；展示 SRE troubleshooting、check status、Develop implementation、Test execution 的完整摘要和工具调用证据。
+- **SRE Operations**：目标服务器、Storage、GPU server、K8S 状态；最近巡检；最近事故；报告库。
+- **Develop Board**：Develop Agent 当前 feature/bugfix、关联 PRD/phase doc、改动文件、实现状态、阻塞点、关联测试。
+- **Test Dashboard**：测试用例、测试状态、最近运行、失败详情、覆盖需求矩阵。
+- **Token Usage**：按 agent/session/provider/model 统计 input/output/cache/reasoning token、估算成本和每日预算消耗。
+
+数据落地建议：
+- `proagent/storage/session_history.db`：消息、session、agent、target、summary、tool events。
+- `proagent/storage/work_items.db`：需求、feature、bugfix、实现状态、测试状态。
+- `proagent/storage/usage.db`：LLM usage 归一化记录。
+- 可先复用 SQLite，等 7x24 多实例部署稳定后再迁移 PostgreSQL。
+
+### 13.4 Discord Gateway 要求
+
+Discord 是 7x24 主入口，后续与 agent/gateway 一起 Docker 部署。
+
+Slash 交互：
+- `/aigc <prompt>`：切换或发送到 AIGC Agent。
+- `/test <request>`：发送到 Test Agent，支持运行测试、查看测试状态。
+- `/develop <request>`：发送到 Develop Agent，创建/继续 feature 或 bugfix work item。
+- `/sre <request>`：发送到 SRE Agent，执行巡检、排障、状态查询。
+- `/agent status`：显示各 Agent 运行状态、当前 session、最近错误。
+- `/agent switch <aigc|test|develop|sre>`：设置当前 channel/thread 默认 Agent。
+
+运行要求：
+- Gateway 进程必须支持 7x24 长跑：自动重连、心跳、异常隔离、日志轮转、健康检查端点。
+- 每个 Discord channel/thread 绑定独立 session context，避免不同 Agent 的上下文污染。
+- Docker 部署需提供 `Dockerfile`、`docker-compose.yml`、`.env.example`、健康检查和持久卷。
+
+### 13.5 Hermes 裁剪与归档策略
+
+目标不是一次性删除 Hermes，而是把无关能力移入 `archive/` 或禁用路径，保留让 Agent 更聪明的核心资产。
+
+优先保留：
+- Agent loop / provider adapter / prompt builder 中与 tool calling、structured output、streaming、usage 捕获相关的代码。
+- Memory：`agent/memory_manager.py`、`agent/memory_provider.py`、memory plugins 的接口思想；ProAgent 需要按 user/team/lab/target 分层记忆。
+- Skills：`agent/skill_*`、`tools/skills_*`、`tools/skill_manager_tool.py`、`tools/skill_usage.py`、curator 的安全生命周期思想。
+- Session search / history：`hermes_state.py` 的 SQLite + FTS5 思路，迁移为 ProAgent session history。
+- Gateway：Discord platform、api_server、webhook、session_context、restart/status 相关能力。
+- Usage pricing：`agent/usage_pricing.py` 和 transports 中 usage normalizer 的实现，用于 ProAgent token tracking。
+- Tool registry / guardrails：`tools/registry.py`、`agent/tool_guardrails.py`、approval/path safety 相关能力。
+
+优先归档或禁用：
+- 非目标平台入口：Telegram、Slack、WhatsApp、Signal、Matrix、Mattermost、SMS、HomeAssistant、DingTalk、QQ 等，除非后续 phase 明确需要。
+- 娱乐/媒体工具从 SRE/Test/Develop 默认 toolset 移除，仅 AIGC Pack 可用。
+- RL、benchmark、website 文档站、TUI 大量上游兼容层先移入 archive 或保持禁用，不进入 ProAgent runtime 默认路径。
+
+归档规则：
+- 不直接删除仍有引用的代码；先通过 import/test 验证引用链。
+- 归档必须更新 AGENTS.md、phase doc、README 中的路径说明。
+- 每次归档后由 Test Agent 跑最小回归：domain load、policy guard、Discord gateway import、GUI import。
+
+### 13.6 Skills 自动创建要求
+
+ProAgent 需要保留并改造 Hermes 的 Skill 能力，让 Agent 能自动沉淀 SOP。
+
+要求：
+- SRE Agent 在重复排障流程、频繁查询序列、新事故类型出现时，提出 skill draft。
+- Develop Agent 可把已验证的 feature/bugfix 工作流沉淀为 develop skill。
+- Test Agent 为每个 skill draft 生成 dry-run 测试和最小回归用例。
+- Skill 自动创建必须是 draft-first：自动生成 `SKILL.md` 草稿、引用 evidence、标记来源 session，经用户或 reviewer approve 后才启用。
+- Skill 文件需要版本、owner、适用 Agent、允许工具、停止条件、测试命令、回滚方式。
+
+### 13.7 Memory 要求
+
+Memory 是降低 token 消耗和提升个性化/环境认知的关键能力，需要保留并增强。
+
+分层：
+- User memory：用户偏好、常用语言、报告格式。
+- Lab memory：Storage/GPU/K8S 拓扑、命名规则、常见故障、维护窗口。
+- Target memory：每台服务器/集群的硬件、服务、历史异常、基线指标。
+- Agent memory：每个 Agent 的已知限制、常用流程、上次任务状态。
+
+约束：
+- Memory 注入必须 cache-aware，不能在一个长 session 中频繁改写系统提示。
+- 大块历史通过 summary + retrieval 注入，不把完整历史塞进 prompt。
+- 敏感信息不进长期 memory；密钥、token、私网凭据只存在配置/secret。
+
+### 13.8 Token Usage Tracking
+
+Hermes 已经具备 token usage 相关能力：
+- `agent/usage_pricing.py` 定义了 usage 归一化、价格表、成本估算。
+- `agent/transports/chat_completions.py`、`agent/transports/anthropic.py`、`agent/transports/codex.py` 等会从 provider response 中读取 `usage` 字段。
+- 当前 ProAgent 独立 loop 需要把这些 usage 信息显式捕获并持久化，否则 GUI/Discord 无法展示 agent 级成本。
+
+ProAgent 需要新增：
+- `UsageRecord(session_id, agent_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, reasoning_tokens, estimated_cost, created_at)`。
+- 每次 LLM call 后写入 `usage.db`，并把 session total 写入 session summary。
+- Web UI 展示 per-agent / per-session / daily token usage。
+- Discord `/agent usage [today|session]` 查询当前消耗。
+- 阈值告警：超过 daily budget 时向 Discord 提醒，必要时切换 cheaper model 或要求用户确认继续。
+
+### 13.9 文档与 Phase Hook
+
+本项目按 PRD / requirement 驱动开发。以下变更必须先更新文档再改代码：
+- 新 Agent、Agent 职责变化、slash command 变化。
+- feature 级代码变更或架构设计变化。
+- 进入下一 phase 或调整 phase 里程碑。
+- Hermes 代码归档/裁剪策略变化。
+- Memory、Skill、Token usage、权限模型的行为变化。
+
+必须更新：
+- `docs/ProAgent-Redesign-Plan.md`：长期产品设计和跨 phase 决策。
+- 当前 phase doc（例如 `docs/ProAgent-Phase5-Plan.md`）：本 phase 的任务、验收标准和进展。
+- `AGENTS.md`：当 coding instruction、测试命令、目录结构、文档 hook 或安全规则发生变化。
+
+### 13.10 Phase 5 里程碑
+
+| # | 里程碑 | 交付物 | 状态 |
+| --- | --- | --- | --- |
+| M5.1 | Develop Agent Domain Pack | `proagent/domain/develop_agent/` pack.yaml / prompt / policy / skills | 待实现 |
+| M5.2 | Requirement Work Item Store | PRD/feature/bugfix work item schema + CLI/API | 待实现 |
+| M5.3 | Discord Agent Router | `/aigc` `/test` `/develop` `/sre` slash routing + channel default Agent | 待实现 |
+| M5.4 | 7x24 Gateway Hardening | reconnect / heartbeat / healthcheck / Docker deployment | 待实现 |
+| M5.5 | Web UI Session History | SRE/Test/Develop session history + filters + detail view | 待实现 |
+| M5.6 | Develop Board | feature/bugfix status, linked docs, changed files, test status | 待实现 |
+| M5.7 | Test Dashboard | requirement coverage matrix + test case status + latest run evidence | 待实现 |
+| M5.8 | Skill Draft Generator | automatic skill draft + approval workflow + dry-run tests | 待实现 |
+| M5.9 | Memory Upgrade | layered user/lab/target/agent memory + retrieval summaries | 待实现 |
+| M5.10 | Token Usage Tracking | usage capture, usage.db, Web UI and Discord usage commands | 待实现 |
+| M5.11 | Hermes Archive Pass | move/disable useless code with import/test validation | 待实现 |
+| M5.12 | E2E Validation | Test Agent validates SRE/AIGC/Develop + Discord/Web UI flows | 待实现 |
+
+### 13.10.1 Phase 5 Baseline Progress (2026-05-20)
+
+已完成可部署产品化骨架：
+
+- 新增 `develop-agent` Domain Pack，包含 prompt、policy、knowledge、requirement/feature/bugfix/docs sync skills。
+- 新增 `proagent.storage.phase5`：`session_history.db`、`work_items.db`、`usage.db` 的 SQLite store。
+- 新增 `proagent.core.agent_router.AgentRouter`，支持 `/sre`、`/test`、`/develop`、`/aigc` 和 `/agent switch/status/usage`。
+- `proagent gateway` 接入 router、session history，并提供 `/health` HTTP endpoint 供 Docker healthcheck 使用。
+- Streamlit Web UI 增加 Session History、Develop Board、Test Dashboard、Token Usage 面板。
+- 新增 `Dockerfile.proagent`、`docker-compose.proagent.yml`、`.env.proagent.example`，用于 ProAgent gateway + web 双服务部署。
+
+剩余关键缺口：
+
+- 企业级自动审批流、真实 Discord 线上 7x24 soak test、以及物理移动大型 Hermes 目录仍需后续运维窗口执行。
+- Phase 5 baseline 已具备 `UsageStore` provider usage hook、`SkillDraftStore` draft→enable、`LayeredMemoryStore`、Develop work item tools、Web UI 检查面板和 `docs/Hermes-Archive-Plan.md`。
+- Memory baseline 已升级为 user-scoped：同一套 Agent Loop 会按 gateway/user identity 检索并注入当前用户的个人记忆，`memory_remember` / `memory_search` 内置工具用于沉淀和读取客户偏好、反复出现的需求、验收偏好等信息；不同 user_id 的 user-layer memory 不互相注入。
+
+### 13.11 Phase 5 DoD
+
+1. Discord can run 7x24 in Docker and route `/aigc`, `/test`, `/develop`, `/sre` to isolated Agent sessions.
+2. Develop Agent can take a requirement/bugfix, update docs, implement code, and hand off to Test Agent.
+3. Test Agent can run the relevant unit/real tests and show requirement coverage plus status in Web UI.
+4. SRE Agent session history for troubleshooting/check status is searchable in Web UI.
+5. Web UI shows Develop work items, test cases/status, and token usage per Agent/session.
+6. AIGC Agent remains isolated from SRE/Test/Develop toolsets and is usable from Discord.
+7. At least one auto-created skill goes through draft → review → enable → dry-run validation.
+8. Token usage is persisted for every LLM call and visible through Web UI and Discord.
+9. Hermes archive pass removes or disables unused code without breaking domain load, policy guard, Discord gateway import, or GUI import.

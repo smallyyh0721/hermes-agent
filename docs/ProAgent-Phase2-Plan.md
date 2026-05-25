@@ -590,3 +590,5 @@ python proagent_run.py gui   # 默认 http://localhost:8501
 - Provider fallback（多 provider 容错）
 - PII 脱敏 + 密钥轮换
 - Cron 定时巡检 + Discord 推送（框架已就绪，仅需配置）
+
+Phase 5 已拆成独立 phase doc：`docs/ProAgent-Phase5-Plan.md`。后续 Develop Agent、四 Agent Discord routing、Web UI session history、自动 Skill、Memory、Token usage、Hermes archive 工作以 Phase 5 文档为准。

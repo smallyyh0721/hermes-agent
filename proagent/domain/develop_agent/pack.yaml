@@ -1,0 +1,14 @@
+id: develop-agent
+version: 0.1.0
+display_name: Develop Agent
+description: Requirement-driven feature and bugfix development agent for ProAgent runtime.
+max_iterations: 20
+capabilities:
+  read_only: false
+  suggest: true
+  write_action: true
+tools:
+  - code_read
+  - code_edit
+  - test_delegate
+  - docs_update

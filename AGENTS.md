@@ -67,6 +67,59 @@ hermes-agent/
 `gateway.log` when running the gateway. Profile-aware via `get_hermes_home()`.
 Browse with `hermes logs [--follow] [--level ...] [--session ...]`.
 
+## ProAgent Product Workflow
+
+This repository is being redesigned from Hermes into ProAgent, a PRD /
+requirement-driven professional agent runtime. For ProAgent work, docs are part
+of the change contract, not after-the-fact cleanup.
+
+Current product docs:
+
+- `docs/ProAgent-Redesign-Plan.md` — long-term product design, cross-phase
+  architecture, and completed phase records.
+- `docs/ProAgent-Phase5-Plan.md` — active Phase 5 plan: Develop Agent, Discord
+  7x24 routing, Web UI history/status, automatic skills, memory, token usage,
+  and Hermes archive work.
+- `docs/ProAgent-Phase2-Plan.md` — earlier phase plan and progress history.
+
+Four-agent model:
+
+| Agent | Domain / scope |
+| --- | --- |
+| SRE Agent | Lab SRE for Storage / GPU server / K8S troubleshooting and status checks |
+| Test Agent | Requirement-driven validation of SRE/AIGC/Develop behavior with real tests and unit tests |
+| AIGC Agent | Fun/creative generation only; isolated from SRE/Test/Develop toolsets and primarily used from Discord |
+| Develop Agent | Feature/bugfix-driven development of SRE Agent and ProAgent runtime capabilities |
+
+Documentation hook:
+
+- Before any feature-level code change, new design, new Agent behavior, slash
+  command change, memory/skill/token behavior change, or phase transition,
+  update `docs/ProAgent-Redesign-Plan.md` and the current phase doc.
+- Update `AGENTS.md` when coding instructions, test commands, safety rules,
+  directory ownership, or the docs hook itself changes.
+- Work items should be traceable to a PRD, requirement, bug report, or phase
+  milestone. Do not let implementation drift ahead of the requirement docs.
+
+Phase 5 implementation notes:
+
+- Discord slash targets are `/sre`, `/test`, `/develop`, and `/aigc`.
+- ProAgent-specific container deployment uses `Dockerfile.proagent`,
+  `docker-compose.proagent.yml`, and `.env.proagent.example`; the legacy
+  `Dockerfile` / `docker-compose.yml` remain Hermes-oriented.
+- Phase 5 persistent state lives in `proagent/storage/phase5.py` and writes
+  SQLite files under `proagent/storage/`: `session_history.db`,
+  `work_items.db`, `usage.db`, `skill_drafts.db`, and `memory.db`.
+- Web UI is required for SRE/Test/Develop session history, Develop work status,
+  test case status, and token usage. AIGC remains Discord-first and separate.
+- Token usage should reuse/adapt Hermes usage normalization in
+  `agent/usage_pricing.py` and provider response `usage` extraction, then persist
+  per ProAgent session/agent/model.
+- Hermes pruning should archive or disable unused code only after import/test
+  validation. Keep memory, skills, session search, Discord gateway, usage
+  pricing, provider/tool dispatch, approval, and guardrail concepts because they
+  make ProAgent agents smarter.
+
 ## File Dependency Chain
 
 ```

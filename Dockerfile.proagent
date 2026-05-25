@@ -1,0 +1,29 @@
+FROM python:3.13-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PROAGENT_HOME=/data \
+    PROAGENT_HEALTH_HOST=0.0.0.0 \
+    PROAGENT_HEALTH_PORT=8790
+
+WORKDIR /app
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl git openssh-client procps ripgrep && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml README.md ./
+COPY proagent ./proagent
+COPY providers ./providers
+COPY agent ./agent
+COPY tools ./tools
+COPY proagent_run.py proagent.yaml.example .env.proagent.example ./
+
+RUN pip install --no-cache-dir -e ".[messaging,web]" streamlit
+
+VOLUME ["/data"]
+EXPOSE 8501 8790
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD python proagent_run.py healthcheck --url "http://127.0.0.1:${PROAGENT_HEALTH_PORT}/health" || exit 1
+
+CMD ["python", "proagent_run.py", "gateway", "--health-host", "0.0.0.0", "--health-port", "8790"]

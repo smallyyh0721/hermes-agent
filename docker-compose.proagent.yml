@@ -1,0 +1,43 @@
+services:
+  proagent-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.proagent
+    image: proagent:phase5
+    container_name: proagent-gateway
+    restart: unless-stopped
+    env_file:
+      - .env.proagent
+    volumes:
+      - proagent-storage:/app/proagent/storage
+      - proagent-output:/app/output
+      - ~/.ssh:/root/.ssh:ro
+    ports:
+      - "8790:8790"
+    healthcheck:
+      test: ["CMD", "python", "proagent_run.py", "healthcheck", "--url", "http://127.0.0.1:8790/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  proagent-web:
+    image: proagent:phase5
+    container_name: proagent-web
+    restart: unless-stopped
+    depends_on:
+      proagent-gateway:
+        condition: service_healthy
+    env_file:
+      - .env.proagent
+    volumes:
+      - proagent-storage:/app/proagent/storage
+      - proagent-output:/app/output
+      - ~/.ssh:/root/.ssh:ro
+    ports:
+      - "8501:8501"
+    command: ["python", "proagent_run.py", "gui", "--host", "0.0.0.0", "--port", "8501"]
+
+volumes:
+  proagent-storage:
+  proagent-output:

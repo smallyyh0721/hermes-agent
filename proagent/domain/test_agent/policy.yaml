@@ -15,6 +15,7 @@ allow_auto:
 # Phase 4: Test agent can write reports / coverage / test files via report_generate
 write_action_whitelist:
   - report_generate
+  - memory_remember
 
 forbidden:
   - server_shell    # No SSH to production servers

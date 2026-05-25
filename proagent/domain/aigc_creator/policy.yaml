@@ -13,6 +13,7 @@ write_action_whitelist:
   - aigc_generate
   - image_generate_batch
   - image_feedback
+  - memory_remember
 
 forbidden:
   - server_shell

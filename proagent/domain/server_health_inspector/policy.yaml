@@ -18,6 +18,7 @@ require_approval:
 write_action_whitelist:
   - write_diagnosis_report
   - write_inspection_report
+  - memory_remember
 
 forbidden:
   - "*.delete_*"

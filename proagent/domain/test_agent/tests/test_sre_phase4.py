@@ -79,8 +79,12 @@ class TestSREWriteActionWhitelist:
         config = load_policy(_sre_policy_path())
         assert "write_diagnosis_report" in config.write_action_whitelist
         assert "write_inspection_report" in config.write_action_whitelist
-        # Must not contain anything else
-        assert len(config.write_action_whitelist) == 2
+        assert "memory_remember" in config.write_action_whitelist
+        assert set(config.write_action_whitelist) == {
+            "write_diagnosis_report",
+            "write_inspection_report",
+            "memory_remember",
+        }
 
 
 # ---- ensure existing read-only shell denylist still active -----------------

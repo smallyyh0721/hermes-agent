@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ProAgent 当前代码架构说明</title>
+  <style>
+    :root {
+      --bg: #f7f8fb;
+      --panel: #ffffff;
+      --ink: #1f2937;
+      --muted: #667085;
+      --line: #d9e0ea;
+      --blue: #2563eb;
+      --green: #14804a;
+      --amber: #b45309;
+      --red: #b42318;
+      --violet: #7c3aed;
+      --slate: #475467;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font: 14px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(1180px, calc(100% - 40px));
+      margin: 28px auto 56px;
+    }
+    header {
+      margin-bottom: 20px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 30px;
+      letter-spacing: 0;
+    }
+    h2 {
+      margin: 28px 0 12px;
+      font-size: 20px;
+      letter-spacing: 0;
+    }
+    h3 {
+      margin: 18px 0 8px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+    p { margin: 8px 0; }
+    .lead {
+      color: var(--muted);
+      max-width: 900px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin: 14px 0;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+    }
+    .diagram {
+      overflow-x: auto;
+      padding: 10px;
+    }
+    svg text {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      fill: #1f2937;
+    }
+    .small { font-size: 12px; fill: #667085; }
+    .node-title { font-size: 14px; font-weight: 700; }
+    .node-body { font-size: 12px; }
+    .arrow { stroke: #667085; stroke-width: 1.8; marker-end: url(#arrow); fill: none; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 12px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th {
+      background: #eef2f7;
+      font-weight: 700;
+    }
+    tr:last-child td { border-bottom: 0; }
+    code {
+      background: #eef2f7;
+      border: 1px solid #d8dee8;
+      border-radius: 5px;
+      padding: 1px 5px;
+      font-family: "Cascadia Mono", Consolas, monospace;
+      font-size: 0.92em;
+    }
+    ul { margin: 8px 0 8px 22px; padding: 0; }
+    li { margin: 4px 0; }
+    .tag {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      color: var(--slate);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .note {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    @media (max-width: 820px) {
+      main { width: min(100% - 24px, 1180px); }
+      .grid { grid-template-columns: 1fr; }
+      h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>ProAgent 当前代码架构说明</h1>
+    <p class="lead">
+      本文档基于当前仓库中的 <code>proagent/core</code>、<code>proagent/domain</code>、
+      <code>proagent/storage</code> 与 <code>proagent/gui</code> 实现，说明四类 Agent 如何共享同一套运行时架构，
+      又如何通过 Domain Pack、Policy、Tools、Prompt 和 Storage 实现不同职责。
+    </p>
+  </header>
+
+  <section class="panel diagram">
+    <h2>1. 当前代码架构图</h2>
+    <svg width="1120" height="760" viewBox="0 0 1120 760" role="img" aria-label="ProAgent architecture diagram">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#667085"></path>
+        </marker>
+        <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+          <feDropShadow dx="0" dy="1" stdDeviation="1.2" flood-color="#101828" flood-opacity="0.13"/>
+        </filter>
+      </defs>
+
+      <rect x="20" y="20" width="1080" height="720" rx="12" fill="#ffffff" stroke="#d9e0ea"/>
+
+      <rect x="60" y="60" width="1000" height="78" rx="8" fill="#eff6ff" stroke="#bfdbfe" filter="url(#shadow)"/>
+      <text x="80" y="90" class="node-title">入口层 Inbound</text>
+      <text x="80" y="116" class="node-body">Discord slash / DM / mention · Web UI Streamlit · CLI · Cron / API 扩展点</text>
+
+      <path class="arrow" d="M560 138 L560 176"/>
+
+      <rect x="330" y="176" width="460" height="86" rx="8" fill="#f5f3ff" stroke="#ddd6fe" filter="url(#shadow)"/>
+      <text x="350" y="206" class="node-title">Agent Router</text>
+      <text x="350" y="232" class="node-body">proagent/core/agent_router.py</text>
+      <text x="350" y="250" class="small">/sre · /test · /develop · /aigc · /agent switch/status/usage</text>
+
+      <path class="arrow" d="M560 262 L560 302"/>
+
+      <rect x="60" y="302" width="1000" height="120" rx="8" fill="#f8fafc" stroke="#cbd5e1" filter="url(#shadow)"/>
+      <text x="82" y="332" class="node-title">共享 Runtime 层</text>
+      <text x="82" y="358" class="node-body">ProAgentRuntime 加载 config、domain pack、policy、knowledge、tools，并构建 system prompt</text>
+      <text x="82" y="382" class="node-body">ProAgent 最小 LLM loop 负责 function calling、tool execution、usage capture</text>
+      <text x="82" y="404" class="small">关键文件：proagent/core/runtime.py · proagent/core/agent.py · proagent/core/config.py</text>
+
+      <path class="arrow" d="M560 422 L560 462"/>
+
+      <rect x="60" y="462" width="230" height="116" rx="8" fill="#ecfdf3" stroke="#abefc6" filter="url(#shadow)"/>
+      <text x="80" y="492" class="node-title">SRE Agent</text>
+      <text x="80" y="518" class="node-body">server-health-inspector</text>
+      <text x="80" y="540" class="small">巡检、排障、报告</text>
+      <text x="80" y="560" class="small">SSH / metrics / policy 审计</text>
+
+      <rect x="315" y="462" width="230" height="116" rx="8" fill="#fff7ed" stroke="#fed7aa" filter="url(#shadow)"/>
+      <text x="335" y="492" class="node-title">Test Agent</text>
+      <text x="335" y="518" class="node-body">test-agent</text>
+      <text x="335" y="540" class="small">测试生成、执行、报告</text>
+      <text x="335" y="560" class="small">pytest / coverage / PRD parse</text>
+
+      <rect x="570" y="462" width="230" height="116" rx="8" fill="#fdf2fa" stroke="#fbcfe8" filter="url(#shadow)"/>
+      <text x="590" y="492" class="node-title">Develop Agent</text>
+      <text x="590" y="518" class="node-body">develop-agent</text>
+      <text x="590" y="540" class="small">需求驱动开发、文档同步</text>
+      <text x="590" y="560" class="small">work item / scoped edit / handoff</text>
+
+      <rect x="825" y="462" width="230" height="116" rx="8" fill="#eef4ff" stroke="#c7d7fe" filter="url(#shadow)"/>
+      <text x="845" y="492" class="node-title">AIGC Agent</text>
+      <text x="845" y="518" class="node-body">aigc-creator</text>
+      <text x="845" y="540" class="small">提示词优化、内容生成</text>
+      <text x="845" y="560" class="small">Discord-first，和主控制台隔离</text>
+
+      <path class="arrow" d="M175 578 L175 626"/>
+      <path class="arrow" d="M430 578 L430 626"/>
+      <path class="arrow" d="M685 578 L685 626"/>
+      <path class="arrow" d="M940 578 L940 626"/>
+
+      <rect x="60" y="626" width="1000" height="78" rx="8" fill="#f8fafc" stroke="#cbd5e1" filter="url(#shadow)"/>
+      <text x="82" y="656" class="node-title">共享状态与治理层</text>
+      <text x="82" y="682" class="node-body">SQLite stores：session_history · work_items · usage · skill_drafts · memory；PolicyGuard + AuditStore 负责权限与审计</text>
+    </svg>
+  </section>
+
+  <section class="panel">
+    <h2>2. Agent 如何共享同一套架构</h2>
+    <p>
+      ProAgent 的核心设计是“一个 runtime，多种 domain pack”。四类 Agent 不各自实现一套独立框架，
+      而是共享 <code>ProAgentRuntime</code>、<code>ProAgent</code>、<code>AgentRouter</code>、
+      <code>PolicyGuard</code> 和 Phase 5 SQLite stores。
+    </p>
+    <div class="grid">
+      <div>
+        <h3>共享的运行时路径</h3>
+        <ul>
+          <li><code>AgentRouter</code> 把入口消息映射为 <code>agent_id</code> 和 <code>domain_id</code>。</li>
+          <li><code>ProAgentRuntime</code> 根据 <code>domain_id</code> 加载对应 Domain Pack。</li>
+          <li><code>DomainPack</code> 提供 prompt、knowledge、skills、tools 和 policy。</li>
+          <li><code>ProAgent</code> 使用同一套 LLM function calling loop 调用工具。</li>
+          <li><code>PolicyGuard</code> 在工具调用前做权限检查，<code>AuditStore</code> 记录关键行为。</li>
+        </ul>
+      </div>
+      <div>
+        <h3>共享的持久化能力</h3>
+        <ul>
+          <li><code>SessionHistoryStore</code>：记录会话、消息、工具事件。</li>
+          <li><code>WorkItemStore</code>：记录 Develop/Test 闭环里的需求、实现、测试状态。</li>
+          <li><code>UsageStore</code>：记录 provider 返回的 token usage。</li>
+          <li><code>SkillDraftStore</code>：保存自动沉淀的 skill 草稿和启用状态。</li>
+          <li><code>LayeredMemoryStore</code>：保存 user/lab/target/agent 分层记忆。</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>3. 不同 Agent 如何实现不同作用</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Domain Pack</th>
+          <th>主要职责</th>
+          <th>差异化实现点</th>
+          <th>主要入口</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>SRE Agent</strong></td>
+          <td><code>proagent/domain/server_health_inspector</code></td>
+          <td>服务器巡检、Storage/GPU/K8S 状态检查、故障排查、报告生成。</td>
+          <td>
+            <span class="tag">requires_ssh=true</span>
+            <span class="tag">server_shell</span>
+            <span class="tag">只读优先</span>
+            <span class="tag">报告写入白名单</span>
+          </td>
+          <td><code>/sre</code>、Web UI、Cron</td>
+        </tr>
+        <tr>
+          <td><strong>Test Agent</strong></td>
+          <td><code>proagent/domain/test_agent</code></td>
+          <td>从 PRD/代码生成测试，执行 pytest/jest/playwright 等测试，产出测试报告。</td>
+          <td>
+            <span class="tag">test_execute</span>
+            <span class="tag">coverage_read</span>
+            <span class="tag">report_generate</span>
+            <span class="tag">max_iterations=50</span>
+          </td>
+          <td><code>/test</code>、Web UI、CLI</td>
+        </tr>
+        <tr>
+          <td><strong>Develop Agent</strong></td>
+          <td><code>proagent/domain/develop_agent</code></td>
+          <td>基于需求或 bug report 做功能开发、文档同步、work item 状态更新，并交给 Test Agent 验证。</td>
+          <td>
+            <span class="tag">work_item_create</span>
+            <span class="tag">code_edit</span>
+            <span class="tag">docs_update</span>
+            <span class="tag">test_delegate</span>
+          </td>
+          <td><code>/develop</code>、Web UI、CLI</td>
+        </tr>
+        <tr>
+          <td><strong>AIGC Agent</strong></td>
+          <td><code>proagent/domain/aigc_creator</code></td>
+          <td>娱乐与创作场景，进行提示词优化、图片/内容生成和反馈记录。</td>
+          <td>
+            <span class="tag">AIGC-only tools</span>
+            <span class="tag">Discord-first</span>
+            <span class="tag">不进入主产品闭环</span>
+          </td>
+          <td><code>/aigc</code>、Discord</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2>4. 请求处理流</h2>
+    <ol>
+      <li>用户通过 Discord slash command、DM、Web UI 或 CLI 发起请求。</li>
+      <li><code>AgentRouter</code> 解析命令，例如 <code>/sre 检查磁盘</code> 会映射到 <code>server-health-inspector</code>。</li>
+      <li><code>ProAgentRuntime</code> 加载对应 Domain Pack：<code>pack.yaml</code>、<code>system_prompt.md</code>、<code>knowledge/</code>、<code>skills/</code>、<code>tools/</code>、<code>policy.yaml</code>。</li>
+      <li><code>ProAgent</code> 组装 system prompt 和 tool schemas，调用 LLM。</li>
+      <li>LLM 触发工具调用时，<code>PolicyGuard</code> 根据工具类别和 domain policy 决定允许或拒绝。</li>
+      <li>执行结果写入 session history、audit、usage 等 store，并返回给入口层。</li>
+      <li>Web UI 从 SQLite stores 读取历史、work item、测试状态、token usage、memory 和 skill drafts。</li>
+    </ol>
+  </section>
+
+  <section class="panel">
+    <h2>5. Domain Pack 是职责差异的核心边界</h2>
+    <p>
+      每个 Agent 的“人格”和“能力”主要由 Domain Pack 定义，而不是由 runtime 中的 if/else 写死。
+      <code>proagent/domain/base.py</code> 的 <code>load_pack()</code> 会动态读取 pack 目录，并导入
+      <code>tools/__init__.py</code> 暴露的工具列表。
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>文件或目录</th>
+          <th>作用</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>pack.yaml</code></td>
+          <td>声明 domain id、显示名称、描述、模型偏好、入口、能力开关、最大迭代数。</td>
+        </tr>
+        <tr>
+          <td><code>system_prompt.md</code></td>
+          <td>定义 Agent 的职责、语气、安全规则和输出标准。</td>
+        </tr>
+        <tr>
+          <td><code>policy.yaml</code></td>
+          <td>定义 denylist、forbidden tools、write_action 白名单。</td>
+        </tr>
+        <tr>
+          <td><code>knowledge/</code></td>
+          <td>存放领域知识、拓扑、术语、阈值、操作背景。</td>
+        </tr>
+        <tr>
+          <td><code>skills/</code></td>
+          <td>存放 SOP 和可复用流程，支持后续从 skill draft 启用。</td>
+        </tr>
+        <tr>
+          <td><code>tools/__init__.py</code></td>
+          <td>返回该 Agent 可用的 <code>ToolDef</code> 列表，决定实际可执行能力。</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="panel">
+    <h2>6. 代码索引</h2>
+    <ul>
+      <li><code>proagent/core/runtime.py</code>：共享 runtime，负责加载配置、domain pack、policy、knowledge 和 tools。</li>
+      <li><code>proagent/core/agent.py</code>：最小 LLM loop，负责 function calling、工具执行和 token usage 记录。</li>
+      <li><code>proagent/core/agent_router.py</code>：四 Agent 路由和 channel/thread 默认 Agent 状态。</li>
+      <li><code>proagent/domain/base.py</code>：Domain Pack 发现与动态加载。</li>
+      <li><code>proagent/storage/phase5.py</code>：Phase 5 共享状态库。</li>
+      <li><code>proagent/gui/app.py</code>：Streamlit 控制台，展示历史、看板、测试状态、usage、memory、skill drafts。</li>
+      <li><code>proagent/cli/main.py</code>：CLI、Gateway、GUI、Healthcheck 入口。</li>
+    </ul>
+    <p class="note">
+      生成时间：2026-05-20。本文档是当前代码结构说明，不替代 Phase 5 计划文档。
+    </p>
+  </section>
+</main>
+</body>
+</html>

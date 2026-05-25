@@ -1,0 +1,12 @@
+denylist_patterns:
+  - "(?i)git\\s+reset\\s+--hard"
+  - "(?i)git\\s+checkout\\s+--"
+  - "(?i)rm\\s+-rf\\s+/"
+  - "(?i)del\\s+/s"
+forbidden_tools: []
+write_action_whitelist:
+  - docs_update
+  - code_edit
+  - work_item_create
+  - work_item_update
+  - memory_remember

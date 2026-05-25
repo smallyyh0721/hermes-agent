@@ -23,6 +23,12 @@ from pathlib import Path
 # Ensure project root is importable
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 
 def main():
     parser = argparse.ArgumentParser(
@@ -79,6 +85,12 @@ def main():
     # gateway
     gw_parser = subparsers.add_parser("gateway", help="Start gateway mode (Discord)")
     gw_parser.add_argument("--config", "-c", help="Path to proagent.yaml")
+    gw_parser.add_argument("--health-host", default=os.environ.get("PROAGENT_HEALTH_HOST", "127.0.0.1"))
+    gw_parser.add_argument("--health-port", type=int, default=int(os.environ.get("PROAGENT_HEALTH_PORT", "8790")))
+
+    # healthcheck
+    health_parser = subparsers.add_parser("healthcheck", help="Check ProAgent health endpoint")
+    health_parser.add_argument("--url", default="http://127.0.0.1:8790/health")
 
     # domain
     domain_parser = subparsers.add_parser("domain", help="Manage domain packs")
@@ -114,6 +126,8 @@ def main():
         cmd_status(args)
     elif args.command == "gateway":
         cmd_gateway(args)
+    elif args.command == "healthcheck":
+        cmd_healthcheck(args)
     elif args.command == "domain":
         cmd_domain(args)
     elif args.command == "gui":
@@ -176,6 +190,8 @@ def cmd_run(args):
 
     # Build tools from domain pack (auto-discovered, no hardcoding)
     tools = runtime.get_tools()
+    from proagent.storage.phase5 import LayeredMemoryStore
+    memory_store = LayeredMemoryStore(Path("proagent/storage/memory.db"))
 
     try:
         agent = ProAgent(
@@ -187,6 +203,9 @@ def cmd_run(args):
             verbose=verbose,
             max_iterations=max_iterations,
             policy_guard=runtime.policy,
+            memory_store=memory_store,
+            memory_user_id="cli:local",
+            session_id="cli:local",
         )
     except RuntimeError as e:
         print(f"❌ {e}")
@@ -251,6 +270,7 @@ def _run_hermes_agent(runtime, config):
 def _run_repl_from_runtime(runtime, config, verbose=False):
     """Helper: build agent from runtime+config and run REPL."""
     from proagent.core.agent import ProAgent, build_server_shell_tool
+    from proagent.storage.phase5 import LayeredMemoryStore
     mc = config.models.executor
     agent = ProAgent(
         provider=mc.provider,
@@ -259,6 +279,9 @@ def _run_repl_from_runtime(runtime, config, verbose=False):
         tools=[build_server_shell_tool(runtime)],
         base_url=mc.base_url,
         verbose=verbose,
+        memory_store=LayeredMemoryStore(Path("proagent/storage/memory.db")),
+        memory_user_id="cli:local",
+        session_id="cli:local",
     )
     _run_repl(agent, runtime)
 
@@ -659,35 +682,66 @@ def cmd_gateway(args):
     """Start the gateway (Discord) mode."""
     from proagent.core.config import load_config
     from proagent.core.runtime import ProAgentRuntime
-    from proagent.core.agent import ProAgent, build_server_shell_tool
+    from proagent.core.agent import ProAgent
+    from proagent.core.agent_router import AgentRouter
+    from proagent.storage.phase5 import LayeredMemoryStore, SessionHistoryStore, UsageStore, WorkItemStore
 
     config_path = Path(args.config) if hasattr(args, "config") and args.config else None
-    config = load_config(config_path)
+    base_config = load_config(config_path)
 
     print("🚀 ProAgent Discord Gateway starting...")
-    runtime = ProAgentRuntime(config=config)
+    _start_health_server(args.health_host, args.health_port)
+    print(f"   Health: http://{args.health_host}:{args.health_port}/health")
 
-    # Connect targets
-    results = runtime.connect_targets()
-    for target_id, success in results.items():
-        status = "✅" if success else "❌"
-        print(f"   {status} {target_id}")
-    print()
+    storage_dir = Path("proagent/storage")
+    session_store = SessionHistoryStore(storage_dir / "session_history.db")
+    work_store = WorkItemStore(storage_dir / "work_items.db")
+    usage_store = UsageStore(storage_dir / "usage.db")
+    memory_store = LayeredMemoryStore(storage_dir / "memory.db")
+    router = AgentRouter(session_store=session_store, work_store=work_store, usage_store=usage_store)
 
-    # Build the agent
-    mc = config.models.executor
-    agent = ProAgent(
-        provider=mc.provider,
-        model=mc.model,
-        system_prompt=runtime.build_hermes_system_prompt(),
-        tools=[build_server_shell_tool(runtime)],
-        base_url=mc.base_url,
-    )
+    runtimes = {}
+    agents = {}
+
+    def _runtime_for(domain_id: str) -> ProAgentRuntime:
+        if domain_id not in runtimes:
+            cfg = load_config(config_path)
+            cfg.domain = domain_id
+            runtime = ProAgentRuntime(config=cfg)
+            if runtime.should_init_ssh():
+                results = runtime.connect_targets()
+                for target_id, success in results.items():
+                    status = "✅" if success else "❌"
+                    print(f"   {status} {domain_id}:{target_id}")
+            runtimes[domain_id] = runtime
+        return runtimes[domain_id]
+
+    def _agent_for(domain_id: str, session_key: str, user_id: str) -> ProAgent:
+        key = (domain_id, session_key, user_id)
+        if key not in agents:
+            runtime = _runtime_for(domain_id)
+            pack = getattr(runtime, "_domain_pack", None)
+            mc = runtime.config.models.executor
+            agents[key] = ProAgent(
+                provider=mc.provider,
+                model=mc.model,
+                system_prompt=runtime.build_hermes_system_prompt(),
+                tools=runtime.get_tools(),
+                base_url=mc.base_url,
+                max_iterations=getattr(pack, "max_iterations", 15) if pack else 15,
+                policy_guard=runtime.policy,
+                usage_store=usage_store,
+                memory_store=memory_store,
+                memory_user_id=f"discord:{user_id}",
+                session_id=session_key,
+                agent_id=domain_id,
+            )
+        return agents[key]
 
     # Start Discord bot
     token = os.environ.get("DISCORD_BOT_TOKEN", "")
     if not token:
-        discord_gw = config.gateways.get("discord")
+        discord_gw = base_config.gateways.get("discord")
         if discord_gw:
             token = discord_gw.settings.get("token", "")
     if not token:
@@ -709,25 +763,118 @@ def cmd_gateway(args):
         print(f"   🌐 Using proxy: {proxy_url}")
 
     client = discord.Client(intents=intents, proxy=proxy_url if proxy_url else None)
+    tree = discord.app_commands.CommandTree(client)
 
-    # Per-user conversation agents
-    user_agents: Dict[int, ProAgent] = {}  # type: ignore
+    async def _run_routed_prompt(content: str, channel_id: str, user_id: str) -> str:
+        routed = router.route_message(content, channel_id=channel_id, user_id=user_id, source="discord")
+        if routed.control_response:
+            return routed.control_response
 
-    def _get_agent_for(user_id: int) -> ProAgent:
-        if user_id not in user_agents:
-            user_agents[user_id] = ProAgent(
-                provider=mc.provider,
-                model=mc.model,
-                system_prompt=runtime.build_hermes_system_prompt(),
-                tools=[build_server_shell_tool(runtime)],
-                base_url=mc.base_url,
+        session_store.start_session(
+            session_id=routed.session_id,
+            agent_id=routed.agent_id,
+            channel_id=f"discord:{channel_id}",
+            user_id=user_id,
+            source="discord",
+        )
+        session_store.add_message(routed.session_id, "user", routed.prompt)
+
+        import asyncio
+        user_agent = _agent_for(routed.domain_id, routed.session_id, user_id)
+        try:
+            response = await asyncio.get_running_loop().run_in_executor(
+                None, user_agent.chat, routed.prompt
             )
-        return user_agents[user_id]
+            session_store.add_message(routed.session_id, "assistant", response or "")
+            session_store.finish_session(routed.session_id, "ok", (response or "")[:500])
+            return response or "(empty response)"
+        except Exception as e:
+            response = f"❌ Error: {e}"
+            session_store.add_message(routed.session_id, "assistant", response)
+            session_store.finish_session(routed.session_id, "error", str(e)[:500])
+            return response
+
+    async def _send_long(send_fn, response: str) -> None:
+        chunks = [response[i:i+1900] for i in range(0, len(response), 1900)] or ["(empty response)"]
+        for chunk in chunks:
+            await send_fn(f"```\n{chunk}\n```" if "\n" in chunk else chunk)
 
     @client.event
     async def on_ready():
         print(f"✅ Discord connected as {client.user}")
-        print("   Send a DM or @ mention the bot to interact")
+        print("   Slash routes: /sre /test /develop /aigc; controls: /agent status")
+        try:
+            guild_id = os.environ.get("DISCORD_GUILD_ID", "")
+            if guild_id:
+                guild = discord.Object(id=int(guild_id))
+                tree.copy_global_to(guild=guild)
+                await tree.sync(guild=guild)
+                print(f"   Synced app commands to guild {guild_id}")
+            else:
+                await tree.sync()
+                print("   Synced global app commands")
+        except Exception as e:
+            print(f"   ⚠️ Discord app command sync failed: {e}")
+
+    async def _slash_agent(interaction, agent_id: str, request: str) -> None:
+        await interaction.response.defer(thinking=True)
+        channel_id = str(interaction.channel_id or "dm")
+        user_id = str(interaction.user.id)
+        response = await _run_routed_prompt(f"/{agent_id} {request}", channel_id, user_id)
+        await _send_long(interaction.followup.send, response)
+
+    @tree.command(name="sre", description="Route a request to the SRE Agent")
+    async def slash_sre(interaction: discord.Interaction, request: str):
+        await _slash_agent(interaction, "sre", request)
+
+    @tree.command(name="test", description="Route a request to the Test Agent")
+    async def slash_test(interaction: discord.Interaction, request: str):
+        await _slash_agent(interaction, "test", request)
+
+    @tree.command(name="develop", description="Route a request to the Develop Agent")
+    async def slash_develop(interaction: discord.Interaction, request: str):
+        await _slash_agent(interaction, "develop", request)
+
+    @tree.command(name="aigc", description="Route a prompt to the AIGC Agent")
+    async def slash_aigc(interaction: discord.Interaction, prompt: str):
+        await _slash_agent(interaction, "aigc", prompt)
+
+    agent_group = discord.app_commands.Group(
+        name="agent",
+        description="ProAgent gateway controls",
+    )
+
+    @agent_group.command(name="status", description="Show ProAgent gateway and router status")
+    async def agent_status(interaction: discord.Interaction):
+        routed = router.route_message(
+            "/agent status",
+            channel_id=str(interaction.channel_id or "dm"),
+            user_id=str(interaction.user.id),
+            source="discord",
+        )
+        await interaction.response.send_message(routed.control_response or "ProAgent router ok.")
+
+    @agent_group.command(name="usage", description="Show today's ProAgent token usage")
+    async def agent_usage(interaction: discord.Interaction, scope: str = "today"):
+        routed = router.route_message(
+            f"/agent usage {scope}",
+            channel_id=str(interaction.channel_id or "dm"),
+            user_id=str(interaction.user.id),
+            source="discord",
+        )
+        await interaction.response.send_message(routed.control_response or "Usage unavailable.")
+
+    @agent_group.command(name="switch", description="Set this channel's default agent")
+    async def agent_switch(interaction: discord.Interaction, name: str):
+        routed = router.route_message(
+            f"/agent switch {name}",
+            channel_id=str(interaction.channel_id or "dm"),
+            user_id=str(interaction.user.id),
+            source="discord",
+        )
+        await interaction.response.send_message(routed.control_response or "Agent switch unavailable.")
+
+    tree.add_command(agent_group)
 
     @client.event
     async def on_message(message):
@@ -750,35 +897,69 @@ def cmd_gateway(args):
 
         # Special commands
         if content.lower() in ("/new", "/reset"):
-            user_agents.pop(message.author.id, None)
+            for key in list(agents):
+                if str(message.author.id) in key[1]:
+                    agents.pop(key, None)
             await message.reply("🔄 Conversation reset")
             return
 
-        # Process via agent (blocking call in executor)
-        import asyncio
         async with message.channel.typing():
-            user_agent = _get_agent_for(message.author.id)
-            try:
-                response = await asyncio.get_event_loop().run_in_executor(
-                    None, user_agent.chat, content
-                )
-            except Exception as e:
-                response = f"❌ Error: {e}"
-
-        # Split long responses
-        if not response:
-            response = "(empty response)"
-        # Discord message limit is 2000 chars
-        chunks = [response[i:i+1900] for i in range(0, len(response), 1900)]
-        for chunk in chunks:
-            await message.reply(f"```\n{chunk}\n```" if "\n" in chunk else chunk)
+            response = await _run_routed_prompt(
+                content,
+                channel_id=str(getattr(message.channel, "id", "dm")),
+                user_id=str(message.author.id),
+            )
+        await _send_long(message.reply, response)
 
     try:
         client.run(token)
     except KeyboardInterrupt:
         print("\n👋 Gateway stopped.")
     finally:
-        runtime.ssh_pool.disconnect_all()
+        for runtime in runtimes.values():
+            runtime.ssh_pool.disconnect_all()
+
+
+def _start_health_server(host: str, port: int) -> None:
+    """Start a tiny background health endpoint for Docker."""
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):  # noqa: N802
+            if self.path != "/health":
+                self.send_response(404)
+                self.end_headers()
+                return
+            body = json.dumps({"status": "ok", "service": "proagent-gateway"}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, _format, *args):
+            return
+
+    server = ThreadingHTTPServer((host, port), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+
+
+def cmd_healthcheck(args):
+    """Check the gateway health endpoint."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(args.url, timeout=5) as resp:
+            if resp.status != 200:
+                print(f"unhealthy: HTTP {resp.status}")
+                sys.exit(1)
+            print(resp.read().decode("utf-8"))
+    except Exception as e:
+        print(f"unhealthy: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

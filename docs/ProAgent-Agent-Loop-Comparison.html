@@ -1,0 +1,651 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ProAgent Agent Loop 实现与对比</title>
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #5f6b7a;
+      --line: #d7dee8;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --blue: #2563eb;
+      --green: #047857;
+      --amber: #b45309;
+      --red: #b91c1c;
+      --slate: #334155;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+      line-height: 1.55;
+    }
+
+    header {
+      background: #111827;
+      color: #fff;
+      padding: 42px 28px 34px;
+      border-bottom: 5px solid var(--blue);
+    }
+
+    header .wrap, main {
+      max-width: 1160px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(28px, 4vw, 44px);
+      letter-spacing: 0;
+      line-height: 1.12;
+    }
+
+    .subtitle {
+      max-width: 920px;
+      margin: 0;
+      color: #d1d5db;
+      font-size: 17px;
+    }
+
+    main {
+      padding: 28px;
+    }
+
+    section {
+      margin: 0 0 24px;
+      padding: 24px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+
+    h2 {
+      margin: 0 0 14px;
+      font-size: 24px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 24px 0 10px;
+      font-size: 18px;
+      line-height: 1.3;
+      letter-spacing: 0;
+    }
+
+    p { margin: 8px 0 12px; }
+
+    code {
+      font-family: Consolas, "Liberation Mono", monospace;
+      background: #eef2f7;
+      border: 1px solid #dbe3ee;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-size: 0.94em;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fbfdff;
+    }
+
+    .metric strong {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--slate);
+    }
+
+    .tag-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: #e8eef8;
+      color: #25364f;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .diagram {
+      width: 100%;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fcfdff;
+      padding: 10px;
+      margin: 14px 0 4px;
+    }
+
+    svg {
+      display: block;
+      min-width: 920px;
+      max-width: 100%;
+      height: auto;
+      font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+    }
+
+    .node { fill: #fff; stroke: #98a8bd; stroke-width: 1.4; }
+    .node-blue { fill: #eff6ff; stroke: #3b82f6; }
+    .node-green { fill: #ecfdf5; stroke: #10b981; }
+    .node-amber { fill: #fffbeb; stroke: #f59e0b; }
+    .node-red { fill: #fef2f2; stroke: #ef4444; }
+    .node-slate { fill: #f8fafc; stroke: #64748b; }
+    .label { fill: #111827; font-size: 15px; font-weight: 650; }
+    .small { fill: #475569; font-size: 12px; font-weight: 500; }
+    .arrow { stroke: #64748b; stroke-width: 1.6; fill: none; marker-end: url(#arrow); }
+    .arrow-blue { stroke: #2563eb; }
+    .arrow-green { stroke: #059669; }
+    .arrow-amber { stroke: #b45309; }
+    .loop { stroke-dasharray: 5 4; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf2f7;
+      color: #1f2937;
+      font-weight: 700;
+    }
+
+    tbody tr:nth-child(even) td { background: #fbfcfe; }
+
+    ul {
+      margin: 8px 0 0 20px;
+      padding: 0;
+    }
+
+    li { margin: 6px 0; }
+
+    .callout {
+      border-left: 4px solid var(--blue);
+      background: #eff6ff;
+      padding: 12px 14px;
+      border-radius: 0 8px 8px 0;
+      margin-top: 14px;
+    }
+
+    .warn { border-left-color: var(--amber); background: #fffbeb; }
+
+    .source-list a {
+      color: #1d4ed8;
+      text-decoration: none;
+    }
+
+    .source-list a:hover { text-decoration: underline; }
+
+    footer {
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 0 28px 32px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 860px) {
+      header, main { padding-left: 16px; padding-right: 16px; }
+      section { padding: 18px; }
+      .grid { grid-template-columns: 1fr; }
+      table { font-size: 13px; }
+      th, td { padding: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>ProAgent Agent Loop 实现与对比</h1>
+      <p class="subtitle">
+        本文档说明当前 ProAgent 的 agent loop 是如何工作的，并与 Hermes 原始 <code>AIAgent.run_conversation</code>
+        loop 及 LangGraph 的图运行模型进行对比。本文以当前仓库代码为准。
+      </p>
+      <div class="tag-row">
+        <span class="tag">当前实现: proagent/core/agent.py</span>
+        <span class="tag">原 Hermes loop: run_agent.py</span>
+        <span class="tag">对比对象: LangGraph</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section>
+      <h2>一页结论</h2>
+      <div class="grid">
+        <div class="metric">
+          <strong>当前 ProAgent</strong>
+          采用最小可控的命令式 loop：用户输入进入会话消息，调用模型，若模型返回 tool call 就执行本地域工具，再把工具结果写回消息并继续循环，直到得到最终回答或达到迭代上限。
+        </div>
+        <div class="metric">
+          <strong>Hermes 原始 loop</strong>
+          是完整产品级运行器：一个大 loop 同时承担流式输出、记忆、压缩、插件、并发工具、会话持久化、中断、委派和恢复等职责，功能强但耦合面更大。
+        </div>
+        <div class="metric">
+          <strong>LangGraph</strong>
+          把 agent 工作流建模为图：State 是共享快照，Node 执行业务步骤，Edge 决定下一步。它适合复杂、有分支、需 checkpoint 和人工介入的长期 workflow。
+        </div>
+      </div>
+      <div class="callout">
+        当前 ProAgent 的设计不是把 Hermes 全量 loop 或 LangGraph 直接搬进来，而是把多入口、多 domain pack、工具白名单、用量记录和部署形态稳定下来；复杂编排可以后续在特定 domain 内引入，而不是作为所有 agent 的基础运行成本。
+      </div>
+    </section>
+
+    <section>
+      <h2>当前 ProAgent Agent Loop</h2>
+      <p>
+        当前 loop 在 <code>proagent/core/agent.py</code> 的 <code>ProAgent.chat()</code> 中实现。它围绕
+        <code>Message</code>、<code>ToolDef</code> 和 provider adapter 工作；路由、domain pack、会话身份和接口入口由上层模块组合。
+      </p>
+
+      <div class="diagram" aria-label="ProAgent loop diagram">
+        <svg viewBox="0 0 1080 360" role="img">
+          <defs>
+            <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#64748b"></path>
+            </marker>
+          </defs>
+          <rect class="node node-blue" x="30" y="74" width="150" height="72" rx="8"></rect>
+          <text class="label" x="105" y="104" text-anchor="middle">用户输入</text>
+          <text class="small" x="105" y="126" text-anchor="middle">Discord/Web/CLI</text>
+
+          <rect class="node node-slate" x="230" y="74" width="170" height="72" rx="8"></rect>
+          <text class="label" x="315" y="102" text-anchor="middle">追加 user Message</text>
+          <text class="small" x="315" y="126" text-anchor="middle">self.messages</text>
+
+          <rect class="node node-blue" x="450" y="74" width="170" height="72" rx="8"></rect>
+          <text class="label" x="535" y="102" text-anchor="middle">调用 LLM</text>
+          <text class="small" x="535" y="126" text-anchor="middle">OpenAI/Anthropic</text>
+
+          <rect class="node node-amber" x="670" y="70" width="160" height="80" rx="8"></rect>
+          <text class="label" x="750" y="101" text-anchor="middle">有 tool_calls?</text>
+          <text class="small" x="750" y="126" text-anchor="middle">最多 max_iterations</text>
+
+          <rect class="node node-green" x="890" y="72" width="150" height="76" rx="8"></rect>
+          <text class="label" x="965" y="103" text-anchor="middle">返回最终回答</text>
+          <text class="small" x="965" y="126" text-anchor="middle">assistant content</text>
+
+          <rect class="node node-green" x="660" y="230" width="180" height="72" rx="8"></rect>
+          <text class="label" x="750" y="258" text-anchor="middle">执行本地 ToolDef</text>
+          <text class="small" x="750" y="282" text-anchor="middle">PolicyGuard + handler</text>
+
+          <rect class="node node-slate" x="430" y="230" width="200" height="72" rx="8"></rect>
+          <text class="label" x="530" y="258" text-anchor="middle">追加 tool Message</text>
+          <text class="small" x="530" y="282" text-anchor="middle">tool_call_id + result</text>
+
+          <path class="arrow arrow-blue" d="M180 110 H230"></path>
+          <path class="arrow arrow-blue" d="M400 110 H450"></path>
+          <path class="arrow arrow-blue" d="M620 110 H670"></path>
+          <path class="arrow arrow-green" d="M830 110 H890"></path>
+          <text class="small" x="860" y="96" text-anchor="middle">否</text>
+
+          <path class="arrow arrow-amber" d="M750 150 V230"></path>
+          <text class="small" x="772" y="192">是</text>
+          <path class="arrow arrow-green" d="M660 266 H630"></path>
+          <path class="arrow arrow-green" d="M530 230 V180 C530 160 535 152 535 146"></path>
+          <path class="arrow arrow-green loop" d="M530 230 C360 212 350 160 450 126"></path>
+          <text class="small" x="420" y="205">继续下一轮模型调用</text>
+        </svg>
+      </div>
+
+      <h3>实现要点</h3>
+      <ul>
+        <li><code>chat(user_input)</code> 先把用户输入追加为 <code>Message(role="user")</code>。</li>
+        <li>每轮调用 <code>_call_openai()</code> 或 <code>_call_anthropic()</code>，provider 差异被限制在适配函数中。</li>
+        <li>如果返回 <code>tool_calls</code>，先保存 assistant 消息，再逐个执行 <code>_execute_tool()</code>。</li>
+        <li><code>_execute_tool()</code> 通过工具名查找 <code>ToolDef</code>，执行可选的 <code>PolicyGuard</code> 检查，再调用本地 handler。</li>
+        <li>工具结果以 <code>Message(role="tool")</code> 写回历史，模型下一轮能读取上轮工具结果。</li>
+        <li>若模型没有继续请求工具，loop 保存 assistant 最终回答并返回。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>入口、路由与多 Agent 共享架构</h2>
+      <p>
+        当前项目把“agent loop”与“入口和身份”拆开。Discord、Web 和 CLI 可以共享同一套 domain pack 加载、工具注册、策略守卫、用量记录和会话标识策略。
+        <code>AgentRouter</code> 负责把入口命令映射到稳定 agent 身份，例如 <code>sre</code>、<code>test</code>、<code>develop</code>、<code>aigc</code>。
+      </p>
+
+      <div class="diagram" aria-label="Shared architecture diagram">
+        <svg viewBox="0 0 1080 380" role="img">
+          <defs>
+            <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#64748b"></path>
+            </marker>
+          </defs>
+          <rect class="node node-blue" x="40" y="52" width="150" height="68" rx="8"></rect>
+          <text class="label" x="115" y="82" text-anchor="middle">Discord Bot</text>
+          <text class="small" x="115" y="104" text-anchor="middle">/sre /test /develop</text>
+
+          <rect class="node node-blue" x="40" y="156" width="150" height="68" rx="8"></rect>
+          <text class="label" x="115" y="186" text-anchor="middle">Web UI</text>
+          <text class="small" x="115" y="208" text-anchor="middle">HTTP session</text>
+
+          <rect class="node node-blue" x="40" y="260" width="150" height="68" rx="8"></rect>
+          <text class="label" x="115" y="290" text-anchor="middle">CLI</text>
+          <text class="small" x="115" y="312" text-anchor="middle">local command</text>
+
+          <rect class="node node-slate" x="270" y="145" width="170" height="86" rx="8"></rect>
+          <text class="label" x="355" y="178" text-anchor="middle">AgentRouter</text>
+          <text class="small" x="355" y="202" text-anchor="middle">agent_id/domain_id</text>
+
+          <rect class="node node-green" x="520" y="42" width="170" height="72" rx="8"></rect>
+          <text class="label" x="605" y="70" text-anchor="middle">Domain Pack</text>
+          <text class="small" x="605" y="94" text-anchor="middle">pack/policy/prompt</text>
+
+          <rect class="node node-green" x="520" y="154" width="170" height="72" rx="8"></rect>
+          <text class="label" x="605" y="182" text-anchor="middle">Tool Registry</text>
+          <text class="small" x="605" y="206" text-anchor="middle">ToolDef handlers</text>
+
+          <rect class="node node-green" x="520" y="266" width="170" height="72" rx="8"></rect>
+          <text class="label" x="605" y="294" text-anchor="middle">Stores</text>
+          <text class="small" x="605" y="318" text-anchor="middle">session/work/usage</text>
+
+          <rect class="node node-amber" x="770" y="130" width="180" height="116" rx="8"></rect>
+          <text class="label" x="860" y="164" text-anchor="middle">ProAgent Loop</text>
+          <text class="small" x="860" y="188" text-anchor="middle">messages + provider</text>
+          <text class="small" x="860" y="210" text-anchor="middle">tool calls + policy</text>
+
+          <path class="arrow" style="marker-end:url(#arrow2)" d="M190 86 C225 86 232 150 270 168"></path>
+          <path class="arrow" style="marker-end:url(#arrow2)" d="M190 190 H270"></path>
+          <path class="arrow" style="marker-end:url(#arrow2)" d="M190 294 C225 294 232 226 270 208"></path>
+          <path class="arrow" style="marker-end:url(#arrow2)" d="M440 188 H520"></path>
+          <path class="arrow" style="marker-end:url(#arrow2)" d="M690 78 C740 92 758 124 780 144"></path>
+          <path class="arrow" style="marker-end:url(#arrow2)" d="M690 190 H770"></path>
+          <path class="arrow" style="marker-end:url(#arrow2)" d="M690 302 C740 286 758 250 780 232"></path>
+        </svg>
+      </div>
+
+      <p>
+        不同 agent 的差异主要来自 domain pack：系统提示词、工具集合、策略白名单、技能文件和默认运行参数不同；它们共享的是同一个小型 loop 和入口适配层。
+      </p>
+    </section>
+
+    <section>
+      <h2>Hermes 原始 Agent Loop</h2>
+      <p>
+        Hermes 原 loop 位于 <code>run_agent.py</code>，核心方法是 <code>AIAgent.run_conversation()</code>。
+        它承担了完整交互运行器职责，因此并不是简单的“模型调用 + 工具调用”循环。
+      </p>
+
+      <div class="diagram" aria-label="Hermes original loop diagram">
+        <svg viewBox="0 0 1080 420" role="img">
+          <defs>
+            <marker id="arrow3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#64748b"></path>
+            </marker>
+          </defs>
+          <rect class="node node-blue" x="42" y="164" width="160" height="76" rx="8"></rect>
+          <text class="label" x="122" y="194" text-anchor="middle">run_conversation</text>
+          <text class="small" x="122" y="218" text-anchor="middle">task/session/history</text>
+
+          <rect class="node node-slate" x="270" y="38" width="190" height="76" rx="8"></rect>
+          <text class="label" x="365" y="68" text-anchor="middle">Prompt 组装</text>
+          <text class="small" x="365" y="92" text-anchor="middle">system/cache/profile</text>
+
+          <rect class="node node-slate" x="270" y="164" width="190" height="76" rx="8"></rect>
+          <text class="label" x="365" y="194" text-anchor="middle">上下文管理</text>
+          <text class="small" x="365" y="218" text-anchor="middle">memory/compression</text>
+
+          <rect class="node node-slate" x="270" y="290" width="190" height="76" rx="8"></rect>
+          <text class="label" x="365" y="320" text-anchor="middle">插件与 Guardrail</text>
+          <text class="small" x="365" y="344" text-anchor="middle">hooks/block/repair</text>
+
+          <rect class="node node-blue" x="540" y="126" width="170" height="90" rx="8"></rect>
+          <text class="label" x="625" y="158" text-anchor="middle">LLM 调用</text>
+          <text class="small" x="625" y="182" text-anchor="middle">stream/retry</text>
+          <text class="small" x="625" y="202" text-anchor="middle">api_call_count</text>
+
+          <rect class="node node-amber" x="780" y="126" width="178" height="90" rx="8"></rect>
+          <text class="label" x="869" y="158" text-anchor="middle">工具调度</text>
+          <text class="small" x="869" y="182" text-anchor="middle">sequential/concurrent</text>
+          <text class="small" x="869" y="202" text-anchor="middle">registry + agent tools</text>
+
+          <rect class="node node-green" x="780" y="278" width="178" height="76" rx="8"></rect>
+          <text class="label" x="869" y="308" text-anchor="middle">会话持久化</text>
+          <text class="small" x="869" y="332" text-anchor="middle">checkpoint/history</text>
+
+          <path class="arrow" style="marker-end:url(#arrow3)" d="M202 202 C238 180 240 92 270 76"></path>
+          <path class="arrow" style="marker-end:url(#arrow3)" d="M202 202 H270"></path>
+          <path class="arrow" style="marker-end:url(#arrow3)" d="M202 202 C238 225 240 310 270 328"></path>
+          <path class="arrow" style="marker-end:url(#arrow3)" d="M460 76 C512 88 520 128 540 148"></path>
+          <path class="arrow" style="marker-end:url(#arrow3)" d="M460 202 H540"></path>
+          <path class="arrow" style="marker-end:url(#arrow3)" d="M460 328 C515 306 524 218 540 198"></path>
+          <path class="arrow" style="marker-end:url(#arrow3)" d="M710 171 H780"></path>
+          <path class="arrow loop" style="marker-end:url(#arrow3)" d="M869 216 C852 250 782 258 710 206"></path>
+          <path class="arrow" style="marker-end:url(#arrow3)" d="M869 216 V278"></path>
+          <text class="small" x="742" y="246">tool result 回写继续</text>
+        </svg>
+      </div>
+
+      <h3>与当前 ProAgent 的关系</h3>
+      <ul>
+        <li>ProAgent 保留了 Hermes 的核心思想：模型可以请求工具，工具结果回写消息，再继续推理。</li>
+        <li>ProAgent 没有继承 Hermes 大 loop 的全量运行时职责，例如流式消费者、复杂压缩、插件生命周期、并发工具池、委派任务和大型 checkpoint 管理。</li>
+        <li>当前项目把这些复杂能力拆到更小的边界：入口路由、domain pack、storage、policy 和 usage 分别演进。</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>LangGraph 运行模型</h2>
+      <p>
+        LangGraph 官方文档把 agent workflow 建模为 graph。Graph 的核心组成是 <code>State</code>、<code>Nodes</code> 和
+        <code>Edges</code>：State 是当前快照，Node 是执行业务逻辑的函数，Edge 决定接下来执行哪个 Node。
+        Graph 构建完成后需要 compile，运行时可以通过 checkpointer 获得持久化和恢复能力。
+      </p>
+
+      <div class="diagram" aria-label="LangGraph model diagram">
+        <svg viewBox="0 0 1080 390" role="img">
+          <defs>
+            <marker id="arrow4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+              <path d="M0,0 L0,6 L9,3 z" fill="#64748b"></path>
+            </marker>
+          </defs>
+          <rect class="node node-slate" x="50" y="158" width="160" height="74" rx="8"></rect>
+          <text class="label" x="130" y="188" text-anchor="middle">StateGraph</text>
+          <text class="small" x="130" y="212" text-anchor="middle">schema + reducers</text>
+
+          <rect class="node node-blue" x="290" y="54" width="158" height="74" rx="8"></rect>
+          <text class="label" x="369" y="84" text-anchor="middle">Node A</text>
+          <text class="small" x="369" y="108" text-anchor="middle">LLM 或 Python</text>
+
+          <rect class="node node-green" x="290" y="158" width="158" height="74" rx="8"></rect>
+          <text class="label" x="369" y="188" text-anchor="middle">Shared State</text>
+          <text class="small" x="369" y="212" text-anchor="middle">current snapshot</text>
+
+          <rect class="node node-blue" x="290" y="262" width="158" height="74" rx="8"></rect>
+          <text class="label" x="369" y="292" text-anchor="middle">Node B</text>
+          <text class="small" x="369" y="316" text-anchor="middle">tool/workflow step</text>
+
+          <rect class="node node-amber" x="540" y="158" width="174" height="74" rx="8"></rect>
+          <text class="label" x="627" y="188" text-anchor="middle">Edges</text>
+          <text class="small" x="627" y="212" text-anchor="middle">fixed/conditional</text>
+
+          <rect class="node node-green" x="790" y="54" width="190" height="74" rx="8"></rect>
+          <text class="label" x="885" y="84" text-anchor="middle">Checkpointer</text>
+          <text class="small" x="885" y="108" text-anchor="middle">checkpoint/thread_id</text>
+
+          <rect class="node node-green" x="790" y="262" width="190" height="74" rx="8"></rect>
+          <text class="label" x="885" y="292" text-anchor="middle">Interrupt/Resume</text>
+          <text class="small" x="885" y="316" text-anchor="middle">human-in-the-loop</text>
+
+          <path class="arrow" style="marker-end:url(#arrow4)" d="M210 195 H290"></path>
+          <path class="arrow" style="marker-end:url(#arrow4)" d="M448 91 C500 108 512 154 540 178"></path>
+          <path class="arrow" style="marker-end:url(#arrow4)" d="M448 195 H540"></path>
+          <path class="arrow" style="marker-end:url(#arrow4)" d="M448 299 C500 276 512 236 540 212"></path>
+          <path class="arrow" style="marker-end:url(#arrow4)" d="M714 195 C752 158 762 108 790 91"></path>
+          <path class="arrow" style="marker-end:url(#arrow4)" d="M714 195 C752 234 762 282 790 299"></path>
+          <path class="arrow loop" style="marker-end:url(#arrow4)" d="M627 232 C600 318 482 342 448 306"></path>
+          <path class="arrow loop" style="marker-end:url(#arrow4)" d="M627 158 C600 70 482 42 448 82"></path>
+        </svg>
+      </div>
+
+      <p>
+        因此，LangGraph 与当前 ProAgent 的区别不是“有没有工具调用”，而是控制流的表达方式不同：ProAgent 用一段直接的命令式循环表达控制流，LangGraph 用可编译图表达控制流，并把状态持久化、恢复、人工中断等能力放入图运行时。
+      </p>
+    </section>
+
+    <section>
+      <h2>差异对比</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>维度</th>
+            <th>当前 ProAgent</th>
+            <th>Hermes 原始 loop</th>
+            <th>LangGraph</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>控制流表达</td>
+            <td><code>for iteration in range(max_iterations)</code> 的命令式循环。</td>
+            <td>大型命令式 conversation loop，内含多个运行时分支和回调点。</td>
+            <td>声明式图：State、Node、Edge 组合后 compile 运行。</td>
+          </tr>
+          <tr>
+            <td>状态模型</td>
+            <td><code>self.messages</code> 是主要上下文；session/work/usage 由外层 store 管理。</td>
+            <td>消息、任务、记忆、压缩状态、检查点、插件状态在运行器内协作。</td>
+            <td>共享 State 是一等概念，节点返回 state update，runtime 负责合并。</td>
+          </tr>
+          <tr>
+            <td>工具执行</td>
+            <td>按模型返回顺序逐个执行 <code>ToolDef.handler</code>，并通过 <code>PolicyGuard</code> 检查。</td>
+            <td>可顺序或并发执行，支持 agent-level tools、registry tools、插件 block、显示兼容路径。</td>
+            <td>工具通常是图节点或工具节点的一部分，路径由边和条件边控制。</td>
+          </tr>
+          <tr>
+            <td>多 Agent 方式</td>
+            <td>共享 loop，不同 domain pack 定义不同 prompt、tools、policy 和技能。</td>
+            <td>通过完整 AIAgent 运行器和工具系统支持较宽泛的任务形态。</td>
+            <td>可在图中建多节点、多子图、多 agent handoff，适合显式 workflow。</td>
+          </tr>
+          <tr>
+            <td>持久化和恢复</td>
+            <td>Phase 5 store 记录会话、工作项和 usage；单次 loop 本身不依赖 checkpoint。</td>
+            <td>内置更重的 session/checkpoint/history 管理。</td>
+            <td>checkpointer 是核心能力之一，可按 thread 保存每步 state，用于恢复和人工介入。</td>
+          </tr>
+          <tr>
+            <td>复杂度</td>
+            <td>低，便于审计、Docker 部署和 domain pack 扩展。</td>
+            <td>高，功能密集，修改时需要理解更多交叉影响。</td>
+            <td>中到高，图模型清晰但需要维护 state schema、reducers、节点和边。</td>
+          </tr>
+          <tr>
+            <td>适用场景</td>
+            <td>7/24 服务入口、Discord/Web/CLI、多 domain 工具助手。</td>
+            <td>完整 Hermes 交互式 coding agent 和本地开发助手。</td>
+            <td>长流程、分支流程、审批流程、可恢复 workflow、多 agent 编排。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>为什么当前不直接使用 Hermes 原 loop 或 LangGraph</h2>
+      <h3>不直接使用 Hermes 原 loop</h3>
+      <ul>
+        <li>原 loop 面向通用开发助手，依赖面和运行期状态较多；ProAgent 当前目标是 Docker 化 7/24 服务和稳定接口入口。</li>
+        <li>ProAgent 需要 domain pack 隔离，让 SRE、测试、开发、AIGC 等 agent 的工具权限和 prompt 可审计。</li>
+        <li>小 loop 更容易确定安全边界：工具白名单、策略拒绝、结果截断和 token 用量记录都在清晰位置。</li>
+      </ul>
+
+      <h3>不直接使用 LangGraph</h3>
+      <ul>
+        <li>当前 workflow 主要是“模型决定是否调用工具”的 ReAct 类循环，图运行时的额外抽象不是所有 domain 都需要。</li>
+        <li>LangGraph 的优势在复杂状态机和可恢复 workflow；这些可以作为特定 domain 的内部实现，而不必替代全局基础 loop。</li>
+        <li>先保持基础 loop 小而稳定，可以降低 Discord/Web/CLI 入口同时上线的风险。</li>
+      </ul>
+
+      <div class="callout warn">
+        建议后续只有在某个 domain 出现固定多步流程、审批节点、失败恢复或跨 agent handoff 的明确需求时，再引入 LangGraph 作为该 domain 的 workflow engine。
+      </div>
+    </section>
+
+    <section>
+      <h2>源码索引</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>文件</th>
+            <th>角色</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>proagent/core/agent.py</code></td>
+            <td>当前 ProAgent 最小 agent loop、provider 调用、工具执行、PolicyGuard 检查、usage 记录入口。</td>
+          </tr>
+          <tr>
+            <td><code>proagent/core/agent_router.py</code></td>
+            <td>把 Discord/Web/CLI 的文本命令映射为 agent_id、domain_id 和 session_id。</td>
+          </tr>
+          <tr>
+            <td><code>proagent/domain/base.py</code></td>
+            <td>domain pack 加载基础结构，承载系统提示词、工具和策略配置。</td>
+          </tr>
+          <tr>
+            <td><code>proagent/storage/phase5.py</code></td>
+            <td>Phase 5 会话、工作项、用量等持久化支撑。</td>
+          </tr>
+          <tr>
+            <td><code>run_agent.py</code></td>
+            <td>Hermes 原始 <code>AIAgent</code> 运行器，包括 <code>run_conversation()</code> 和工具调度路径。</td>
+          </tr>
+          <tr>
+            <td><code>docs/ProAgent-Phase5-Plan.md</code></td>
+            <td>Phase 5 对 Discord/Web/CLI、运行状态和部署目标的阶段规划。</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>外部参考</h2>
+      <ul class="source-list">
+        <li><a href="https://docs.langchain.com/oss/python/langgraph/graph-api">LangGraph Graph API overview</a>：官方说明 State、Nodes、Edges 和 compile 过程。</li>
+        <li><a href="https://docs.langchain.com/oss/python/langgraph/persistence">LangGraph Persistence</a>：官方说明 checkpoint、thread、human-in-the-loop、memory、time travel debugging 和 fault-tolerant execution。</li>
+        <li><a href="https://docs.langchain.com/oss/python/langgraph/durable-execution">LangGraph Durable execution</a>：官方说明持久化执行、恢复、determinism 和 idempotency 要求。</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    Generated for ProAgent documentation. 本文件是静态 HTML，可直接在浏览器打开。
+  </footer>
+</body>
+</html>

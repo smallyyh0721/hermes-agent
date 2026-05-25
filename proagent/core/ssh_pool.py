@@ -158,7 +158,7 @@ class SSHConnection:
 
                 try:
                     result = subprocess.run(
-                        cmd, capture_output=True, text=True, timeout=20
+                        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20
                     )
                     if result.returncode == 0 and "proagent-connected" in result.stdout:
                         self.state = ConnectionState.CONNECTED
@@ -205,7 +205,7 @@ class SSHConnection:
             cmd = self._build_ssh_cmd()
             cmd.append("echo alive")
             try:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5)
                 return result.returncode == 0
             except (subprocess.TimeoutExpired, OSError):
                 return False
@@ -215,7 +215,7 @@ class SSHConnection:
         cmd = ["ssh", "-o", f"ControlPath={self.control_socket}", "-O", "check",
                f"{self.target.user}@{self.target.host}"]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5)
             return result.returncode == 0
         except (subprocess.TimeoutExpired, OSError):
             return False
@@ -246,6 +246,8 @@ class SSHConnection:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
             )
             output = result.stdout
@@ -269,7 +271,7 @@ class SSHConnection:
                 try:
                     cmd2 = self._build_ssh_cmd()
                     cmd2.extend(["bash", "-c", shlex.quote(command)])
-                    result = subprocess.run(cmd2, capture_output=True, text=True, timeout=timeout)
+                    result = subprocess.run(cmd2, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout)
                     output = result.stdout
                     if result.stderr:
                         output += "\n[stderr]\n" + result.stderr
@@ -405,6 +407,8 @@ class SSHPool:
                 ["bash", "-c", command],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
             )
             output = result.stdout
@@ -420,6 +424,8 @@ class SSHPool:
                     command,
                     capture_output=True,
                     text=True,
+                    encoding="utf-8",
+                    errors="replace",
                     timeout=timeout,
                     shell=True,
                 )
