@@ -112,6 +112,15 @@ def test_agent_router_parses_slash_commands_and_channel_defaults(tmp_path):
     assert status.control_response
     assert "channel_default=sre" in status.control_response
 
+    news = router.route_message("/news today's AI and football brief", channel_id="c1", user_id="u1")
+    assert news.agent_id == "news"
+    assert news.domain_id == "interest-news-agent"
+    assert news.prompt == "today's AI and football brief"
+
+    switched_news = router.route_message("/agent switch news", channel_id="c1", user_id="u1")
+    assert switched_news.control_response
+    assert "news" in switched_news.control_response
+
 
 def test_develop_agent_pack_is_discoverable_and_local_only():
     from proagent.domain.base import discover_packs, load_pack
@@ -125,6 +134,35 @@ def test_develop_agent_pack_is_discoverable_and_local_only():
     assert pack.get_skills()
     tool_names = {tool.name for tool in pack.get_tools(runtime=None)}
     assert {"code_read", "code_edit", "work_item_create", "work_item_update", "test_delegate"} <= tool_names
+
+
+def test_interest_news_agent_reuses_hermes_skills_and_exposes_discord_digest_tools():
+    import yaml
+
+    from proagent.domain.base import discover_packs, load_pack
+
+    pack_ids = {p["id"] for p in discover_packs()}
+    assert "interest-news-agent" in pack_ids
+
+    pack = load_pack("interest-news-agent")
+    assert pack is not None
+    assert pack.requires_ssh is False
+
+    meta = yaml.safe_load((pack.pack_dir / "pack.yaml").read_text(encoding="utf-8"))
+    assert "discord" in meta["gateways"]
+    assert "cron" in meta["gateways"]
+    assert "optional-skills/devops/watchers/SKILL.md" in meta["skill_refs"]
+    assert "optional-skills/research/duckduckgo-search/SKILL.md" in meta["skill_refs"]
+
+    skills = "\n".join(pack.get_skills())
+    assert "Watchers" in skills
+    assert "DuckDuckGo Search" in skills
+    assert "arXiv Research" in skills
+
+    assert "重大国际新闻" in pack.system_prompt
+    assert "原文链接" in pack.system_prompt
+    tool_names = {tool.name for tool in pack.get_tools(runtime=None)}
+    assert {"news_source_catalog", "fetch_feed", "web_news_search", "digest_outline"} <= tool_names
 
 
 def test_proagent_deployment_manifests_exist_and_use_proagent_entrypoint():
@@ -216,6 +254,47 @@ def test_discord_gateway_registers_agent_control_slash_group():
     assert '@agent_group.command(name="usage"' in text
     assert '@agent_group.command(name="switch"' in text
     assert "tree.add_command(agent_group)" in text
+
+
+def test_proagent_gateway_defaults_to_feishu_when_enabled():
+    from proagent.cli.main import _resolve_gateway_platform
+    from proagent.core.config import GatewayConfig, ProAgentConfig
+
+    config = ProAgentConfig()
+    config.gateways["feishu"] = GatewayConfig(enabled=True, settings={})
+    config.gateways["discord"] = GatewayConfig(enabled=False, settings={})
+
+    assert _resolve_gateway_platform(config) == "feishu"
+
+
+def test_proagent_builds_feishu_platform_config_from_yaml_and_env(monkeypatch):
+    from gateway.config import PlatformConfig
+    from proagent.cli.main import _build_feishu_platform_config
+    from proagent.core.config import GatewayConfig, ProAgentConfig
+
+    monkeypatch.setenv("FEISHU_APP_ID", "cli_test")
+    monkeypatch.setenv("FEISHU_APP_SECRET", "secret_test")
+
+    config = ProAgentConfig()
+    config.gateways["feishu"] = GatewayConfig(
+        enabled=True,
+        settings={
+            "enabled": True,
+            "app_id": "${FEISHU_APP_ID}",
+            "app_secret": "${FEISHU_APP_SECRET}",
+            "domain": "feishu",
+            "connection_mode": "websocket",
+        },
+    )
+
+    platform_config = _build_feishu_platform_config(config)
+
+    assert isinstance(platform_config, PlatformConfig)
+    assert platform_config.enabled is True
+    assert platform_config.extra["app_id"] == "cli_test"
+    assert platform_config.extra["app_secret"] == "secret_test"
+    assert platform_config.extra["domain"] == "feishu"
+    assert platform_config.extra["connection_mode"] == "websocket"
 
 
 def test_user_memory_is_isolated_by_owner_id(tmp_path):

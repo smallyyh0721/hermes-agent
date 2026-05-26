@@ -1,0 +1,42 @@
+# Interest News Agent - Policy Guard Configuration
+# Read-only collection and summarization. Delivery happens through the Discord gateway.
+
+default: deny
+
+allow_auto:
+  - news_source_catalog
+  - fetch_feed
+  - web_news_search
+  - digest_outline
+  - memory_search
+
+write_action_whitelist:
+  - memory_remember
+
+forbidden:
+  - server_shell
+  - "*.delete_*"
+  - "*.drop_*"
+  - "*.exec_arbitrary_shell"
+  - aigc_generate
+
+sandbox:
+  shell:
+    mode: denylist
+    denylist_patterns:
+      - "rm\\s+"
+      - "rmdir"
+      - "git\\s+(push|commit|reset|rebase|merge)"
+      - "curl.*\\|\\s*(sh|bash)"
+      - "wget.*\\|\\s*(sh|bash)"
+      - "pip\\s+install"
+      - "npm\\s+install"
+      - "printenv"
+      - "cat\\s+.*\\.env"
+
+  timeout_sec: 45
+  max_output_kb: 512
+
+audit:
+  sinks: [sqlite]
+  fields: [ts, session_id, actor, tool, args_hash, decision, latency, result_hash]

@@ -37,6 +37,7 @@ class DomainPack:
     policy_path: Path
     knowledge_dir: Path
     skills_dir: Path
+    skill_ref_paths: List[Path] = field(default_factory=list)
     requires_ssh: bool = True
     max_iterations: int = 15  # Max tool-calling rounds per user turn
     max_test_steps: int = 50  # Max steps for test execution workflows
@@ -53,6 +54,9 @@ class DomainPack:
         skills = []
         if self.skills_dir.exists():
             for f in sorted(self.skills_dir.glob("*.md")):
+                skills.append(f.read_text(encoding="utf-8"))
+        for f in self.skill_ref_paths:
+            if f.exists() and f.is_file():
                 skills.append(f.read_text(encoding="utf-8"))
         return skills
 
@@ -151,6 +155,7 @@ def load_pack(domain_id: str, domain_base: Path = None) -> Optional[DomainPack]:
 
     # Load tools dynamically
     tools_loader = _load_tools_module(pack_dir)
+    skill_ref_paths = _resolve_skill_refs(pack_dir, meta.get("skill_refs", []))
 
     # Determine if SSH is needed
     capabilities = meta.get("capabilities", {})
@@ -166,6 +171,7 @@ def load_pack(domain_id: str, domain_base: Path = None) -> Optional[DomainPack]:
         policy_path=pack_dir / "policy.yaml",
         knowledge_dir=pack_dir / "knowledge",
         skills_dir=pack_dir / "skills",
+        skill_ref_paths=skill_ref_paths,
         requires_ssh=requires_ssh,
         max_iterations=meta.get("max_iterations", 15),
         max_test_steps=meta.get("max_test_steps", 50),
@@ -174,6 +180,32 @@ def load_pack(domain_id: str, domain_base: Path = None) -> Optional[DomainPack]:
 
     logger.info("Loaded domain pack: %s (%s)", pack.id, pack.display_name)
     return pack
+
+
+def _resolve_skill_refs(pack_dir: Path, refs: Any) -> List[Path]:
+    """Resolve pack.yaml skill_refs to existing Hermes/OpenClaw skill files."""
+    if not isinstance(refs, list):
+        return []
+
+    repo_root = pack_dir.parents[2]
+    resolved: List[Path] = []
+    for ref in refs:
+        if not isinstance(ref, str) or not ref.strip():
+            continue
+        raw = Path(ref)
+        candidates = []
+        if raw.is_absolute():
+            candidates.append(raw)
+        else:
+            candidates.extend([
+                repo_root / raw,
+                pack_dir / raw,
+            ])
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                resolved.append(candidate)
+                break
+    return resolved
 
 
 def _load_tools_module(pack_dir: Path) -> Optional[Callable]:

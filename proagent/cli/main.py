@@ -802,7 +802,7 @@ def cmd_gateway(args):
     @client.event
     async def on_ready():
         print(f"✅ Discord connected as {client.user}")
-        print("   Slash routes: /sre /test /develop /aigc; controls: /agent status")
+        print("   Slash routes: /sre /test /develop /aigc /news; controls: /agent status")
         try:
             guild_id = os.environ.get("DISCORD_GUILD_ID", "")
             if guild_id:
@@ -838,6 +838,10 @@ def cmd_gateway(args):
     @tree.command(name="aigc", description="Route a prompt to the AIGC Agent")
     async def slash_aigc(interaction: discord.Interaction, prompt: str):
         await _slash_agent(interaction, "aigc", prompt)
+
+    @tree.command(name="news", description="Route a request to the Interest News Brief Agent")
+    async def slash_news(interaction: discord.Interaction, request: str):
+        await _slash_agent(interaction, "news", request)
 
     agent_group = discord.app_commands.Group(
         name="agent",

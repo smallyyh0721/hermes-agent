@@ -134,7 +134,12 @@ from tools.terminal_tool import (
 )
 from tools.tool_result_storage import maybe_persist_tool_result, enforce_turn_budget
 from tools.interrupt import set_interrupt as _set_interrupt
-from tools.browser_tool import cleanup_browser
+try:
+    from tools.browser_tool import cleanup_browser
+    _browser_cleanup_available = True
+except ImportError:
+    cleanup_browser = None
+    _browser_cleanup_available = False
 
 
 # Agent internals extracted to agent/ package for modularity
@@ -3859,7 +3864,8 @@ class AIAgent:
             if self.verbose_logging:
                 logging.warning(f"Failed to cleanup VM for task {task_id}: {e}")
         try:
-            cleanup_browser(task_id)
+            if _browser_cleanup_available and cleanup_browser:
+                cleanup_browser(task_id)
         except Exception as e:
             if self.verbose_logging:
                 logging.warning(f"Failed to cleanup browser for task {task_id}: {e}")
@@ -5538,7 +5544,8 @@ class AIAgent:
 
         # 3. Clean browser daemon sessions
         try:
-            cleanup_browser(task_id)
+            if _browser_cleanup_available and cleanup_browser:
+                cleanup_browser(task_id)
         except Exception:
             pass
 

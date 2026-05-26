@@ -245,6 +245,12 @@ Always provide structured, evidence-based analysis."""
         if self.knowledge_index and len(self.knowledge_index) < 4000:
             parts.append(f"\n## Domain Knowledge Index\n{self.knowledge_index}")
 
+        pack = getattr(self, "_domain_pack", None)
+        if pack:
+            skills = pack.get_skills()
+            if skills:
+                parts.append("\n## Domain Skills\n" + "\n\n---\n\n".join(skills))
+
         # Add policy summary
         policy_summary = """
 ## Policy Rules

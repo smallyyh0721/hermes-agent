@@ -11,6 +11,7 @@ AGENT_DOMAINS = {
     "test": "test-agent",
     "develop": "develop-agent",
     "aigc": "aigc-creator",
+    "news": "interest-news-agent",
 }
 
 
@@ -80,5 +81,5 @@ class AgentRouter:
             )
             return RoutedMessage(default, AGENT_DOMAINS[default], "", session_id, msg)
 
-        msg = "Agent commands: /agent switch <sre|test|develop|aigc>, /agent status, /agent usage"
+        msg = "Agent commands: /agent switch <sre|test|develop|aigc|news>, /agent status, /agent usage"
         return RoutedMessage(default, AGENT_DOMAINS[default], "", session_id, msg)

@@ -1,0 +1,46 @@
+id: interest-news-agent
+version: 0.1.0
+display_name: 兴趣新闻简报 Agent
+description: 汇总用户偏好的国际、科技、AI、财经、动漫、漫展、足球与世界杯资讯，并通过 Discord 输出带原文链接的中文新闻简报。
+
+models:
+  planner:    { provider: minimax-cn, model: MiniMax-M2.7 }
+  executor:   { provider: minimax-cn, model: MiniMax-M2.7 }
+
+gateways:
+  - discord
+  - cron
+  - cli
+
+max_iterations: 25
+
+capabilities:
+  read_only: false
+  suggest: true
+  write_action: true
+
+tools:
+  - news_source_catalog
+  - fetch_feed
+  - web_news_search
+  - digest_outline
+
+skill_refs:
+  - optional-skills/devops/watchers/SKILL.md
+  - optional-skills/research/duckduckgo-search/SKILL.md
+  - skills/research/arxiv/SKILL.md
+  - skills/research/blogwatcher/SKILL.md
+
+coverage:
+  core_news:
+    - 重大国际新闻
+    - 科技新闻
+    - AI行业新闻
+    - 财经新闻
+  culture:
+    - 日漫资讯
+    - 中国动漫资讯
+    - 上海漫展信息
+  sports:
+    - 足球五大联赛
+    - 世界杯相关资讯
