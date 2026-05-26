@@ -69,6 +69,25 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+# ProAgent imports for multi-agent routing (optional)
+try:
+    from proagent.core.agent_router import AgentRouter, AGENT_DOMAINS as _PROAGENT_DOMAINS
+    from proagent.core.runtime import ProAgentRuntime
+    from proagent.core.agent import ProAgent as ProAgentCore
+    from proagent.core.config import load_config as _load_proagent_config
+    from proagent.storage.phase5 import LayeredMemoryStore, SessionHistoryStore, UsageStore
+    _PROAGENT_AVAILABLE = True
+except ImportError:
+    AgentRouter = None
+    ProAgentCore = None
+    ProAgentRuntime = None
+    _load_proagent_config = None
+    LayeredMemoryStore = None
+    SessionHistoryStore = None
+    UsageStore = None
+    _PROAGENT_DOMAINS = {}
+    _PROAGENT_AVAILABLE = False
+
 # aiohttp/websockets are independent optional deps — import outside lark_oapi
 # so they remain available for tests and webhook mode even if lark_oapi is missing.
 try:
@@ -1412,6 +1431,92 @@ class FeishuAdapter(BasePlatformAdapter):
         self._pending_processing_reactions: "OrderedDict[str, str]" = OrderedDict()
         self._load_seen_message_ids()
 
+        # ProAgent multi-agent routing: lazy-init router, runtimes, and agents
+        self._proagent_router: Optional[AgentRouter] = None
+        self._proagent_runtimes: Dict[str, ProAgentRuntime] = {}
+        self._proagent_agents: Dict[tuple, ProAgentCore] = {}
+        self._proagent_storage_dir = Path("proagent/storage")
+        self._proagent_session_store: Optional[SessionHistoryStore] = None
+        self._proagent_usage_store: Optional[UsageStore] = None
+        self._proagent_memory_store: Optional[LayeredMemoryStore] = None
+
+    def _init_proagent(self) -> None:
+        """Lazy initialization of ProAgent multi-agent infrastructure."""
+        if not _PROAGENT_AVAILABLE:
+            logger.debug("[Feishu] ProAgent not available, using Hermes agent")
+            return
+        if self._proagent_router is not None:
+            return
+        try:
+            storage_dir = self._proagent_storage_dir
+            self._proagent_session_store = SessionHistoryStore(storage_dir / "session_history.db")
+            self._proagent_usage_store = UsageStore(storage_dir / "usage.db")
+            self._proagent_memory_store = LayeredMemoryStore(storage_dir / "memory.db")
+            self._proagent_router = AgentRouter(
+                session_store=self._proagent_session_store,
+                work_store=None,
+                usage_store=self._proagent_usage_store,
+            )
+            logger.info("[Feishu] ProAgent router initialized")
+        except Exception as e:
+            logger.warning("[Feishu] Failed to initialize ProAgent router: %s", e)
+            self._proagent_router = None
+
+    def _proagent_runtime_for(self, domain_id: str) -> Optional[ProAgentRuntime]:
+        """Get or create ProAgentRuntime for domain_id."""
+        if not _PROAGENT_AVAILABLE or not domain_id:
+            return None
+        if domain_id in self._proagent_runtimes:
+            return self._proagent_runtimes[domain_id]
+        try:
+            from proagent.core.config import load_config as _lp_cfg
+            cfg = _lp_cfg(None)
+            cfg.domain = domain_id
+            runtime = ProAgentRuntime(config=cfg)
+            if runtime.should_init_ssh():
+                results = runtime.connect_targets()
+                for target_id, success in results.items():
+                    status = "OK" if success else "FAIL"
+                    logger.info("[Feishu] SSH %s:%s -> %s", domain_id, target_id, status)
+            self._proagent_runtimes[domain_id] = runtime
+            return runtime
+        except Exception as e:
+            logger.warning("[Feishu] Failed to create runtime for %s: %s", domain_id, e)
+            return None
+
+    def _proagent_agent_for(self, domain_id: str, session_key: str, user_id: str) -> Optional[ProAgentCore]:
+        """Get or create ProAgent for domain_id + session."""
+        if not _PROAGENT_AVAILABLE or not domain_id:
+            return None
+        key = (domain_id, session_key, user_id)
+        if key in self._proagent_agents:
+            return self._proagent_agents[key]
+        runtime = self._proagent_runtime_for(domain_id)
+        if not runtime:
+            return None
+        try:
+            pack = getattr(runtime, "_domain_pack", None)
+            mc = runtime.config.models.executor
+            agent = ProAgentCore(
+                provider=mc.provider,
+                model=mc.model,
+                system_prompt=runtime.build_hermes_system_prompt(),
+                tools=runtime.get_tools(),
+                base_url=mc.base_url,
+                max_iterations=getattr(pack, "max_iterations", 15) if pack else 15,
+                policy_guard=runtime.policy,
+                usage_store=self._proagent_usage_store,
+                memory_store=self._proagent_memory_store,
+                memory_user_id=f"feishu:{user_id}",
+                session_id=session_key,
+                agent_id=domain_id,
+            )
+            self._proagent_agents[key] = agent
+            return agent
+        except Exception as e:
+            logger.warning("[Feishu] Failed to create agent for %s: %s", domain_id, e)
+            return None
+
     @staticmethod
     def _load_settings(extra: Dict[str, Any]) -> FeishuAdapterSettings:
         # Parse per-group rules from config
@@ -2741,11 +2846,94 @@ class FeishuAdapter(BasePlatformAdapter):
 
         Per-chat lock ensures messages in the same chat are processed one at a
         time (matches openclaw's createChatQueue serial queue behaviour).
+
+        When ProAgent multi-agent routing is enabled and the message is a slash
+        command (/sre, /test, /develop, /aigc, /news), this routes to the
+        appropriate ProAgent domain agent instead of Hermes AIAgent.
         """
         chat_id = getattr(event.source, "chat_id", "") or "" if event.source else ""
         chat_lock = self._get_chat_lock(chat_id)
         async with chat_lock:
+            # Check if this is a ProAgent routing command
+            if _PROAGENT_AVAILABLE:
+                routed = await self._maybe_route_proagent(event)
+                if routed is not None:
+                    return  # response already sent by _maybe_route_proagent
             await self.handle_message(event)
+
+    # =========================================================================
+    # ProAgent multi-agent routing
+    # =========================================================================
+
+    async def _maybe_route_proagent(self, event: MessageEvent) -> Optional[str]:
+        """Route to ProAgent domain agent if this is a slash command.
+
+        Returns None if not a routing command (caller should proceed normally),
+        or an error string to send back to user if routing failed.
+        """
+        text = (event.text or "").strip()
+        if not text.startswith("/"):
+            return None
+
+        self._init_proagent()
+        if not self._proagent_router:
+            return None
+
+        first, _, rest = text.partition(" ")
+        command = first.lstrip("/").lower()
+        if command not in _PROAGENT_DOMAINS:
+            # Not a known domain command — let Hermes handle it
+            return None
+
+        source = event.source
+        channel_id = source.chat_id or "feishu"
+        user_id = source.user_id or "unknown"
+
+        try:
+            import asyncio
+            routed = self._proagent_router.route_message(
+                text, channel_id=channel_id, user_id=user_id, source="feishu"
+            )
+
+            if routed.control_response:
+                # Router control message (status, usage, etc.)
+                await self.send(channel_id, routed.control_response)
+                return ""  # indicate handled
+
+            # Route to domain agent
+            self._proagent_session_store.start_session(
+                session_id=routed.session_id,
+                agent_id=routed.agent_id,
+                channel_id=f"feishu:{channel_id}",
+                user_id=user_id,
+                source="feishu",
+            )
+            self._proagent_session_store.add_message(routed.session_id, "user", routed.prompt)
+
+            agent = self._proagent_agent_for(routed.domain_id, routed.session_id, user_id)
+            if not agent:
+                error_msg = f"❌ Agent '{routed.agent_id}' not available"
+                await self.send(channel_id, error_msg)
+                return error_msg
+
+            response = await asyncio.get_running_loop().run_in_executor(
+                None, agent.chat, routed.prompt
+            )
+            self._proagent_session_store.add_message(routed.session_id, "assistant", response or "")
+            self._proagent_session_store.finish_session(routed.session_id, "ok", (response or "")[:500])
+
+            if response:
+                await self.send(channel_id, response)
+            return ""  # indicate handled
+
+        except Exception as e:
+            error_msg = f"❌ ProAgent routing error: {e}"
+            logger.warning("[Feishu] ProAgent routing failed: %s", e, exc_info=True)
+            try:
+                await self.send(channel_id, error_msg)
+            except Exception:
+                pass
+            return error_msg
 
     # =========================================================================
     # Processing status reactions
